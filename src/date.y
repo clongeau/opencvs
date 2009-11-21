@@ -15,6 +15,7 @@
 /* SUPPRESS 288 on yyerrlab *//* Label unused */
 
 #include <sys/timeb.h>
+#include <sys/types.h>
 
 #include <ctype.h>
 #include <string.h>

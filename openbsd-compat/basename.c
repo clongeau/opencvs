@@ -1,4 +1,4 @@
-/*	$OpenBSD: dirname.c,v 1.13 2005/08/08 08:05:33 espie Exp $	*/
+/*	$OpenBSD: basename.c,v 1.14 2005/08/08 08:05:33 espie Exp $	*/
 
 /*
  * Copyright (c) 1997, 2004 Todd C. Miller <Todd.Miller@courtesan.com>
@@ -16,28 +16,26 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* OPENBSD ORIGINAL: lib/libc/gen/dirname.c */
+/* OPENBSD ORIGINAL: lib/libc/gen/basename.c */
 
 #include "config.h"
 
-#ifndef HAVE_DIRNAME
-
+#ifndef HAVE_BASENAME
 #include <errno.h>
 #include <string.h>
-#include <sys/param.h>
 
 char *
-dirname(const char *path)
+basename(const char *path)
 {
-	static char dname[MAXPATHLEN];
+	static char bname[MAXPATHLEN];
 	size_t len;
-	const char *endp;
+	const char *endp, *startp;
 
 	/* Empty or NULL string gets treated as "." */
 	if (path == NULL || *path == '\0') {
-		dname[0] = '.';
-		dname[1] = '\0';
-		return (dname);
+		bname[0] = '.';
+		bname[1] = '\0';
+		return (bname);
 	}
 
 	/* Strip any trailing slashes */
@@ -45,29 +43,26 @@ dirname(const char *path)
 	while (endp > path && *endp == '/')
 		endp--;
 
-	/* Find the start of the dir */
-	while (endp > path && *endp != '/')
-		endp--;
-
-	/* Either the dir is "/" or there are no slashes */
-	if (endp == path) {
-		dname[0] = *endp == '/' ? '/' : '.';
-		dname[1] = '\0';
-		return (dname);
-	} else {
-		/* Move forward past the separating slashes */
-		do {
-			endp--;
-		} while (endp > path && *endp == '/');
+	/* All slashes becomes "/" */
+	if (endp == path && *endp == '/') {
+		bname[0] = '/';
+		bname[1] = '\0';
+		return (bname);
 	}
 
-	len = endp - path + 1;
-	if (len >= sizeof(dname)) {
+	/* Find the start of the base */
+	startp = endp;
+	while (startp > path && *(startp - 1) != '/')
+		startp--;
+
+	len = endp - startp + 1;
+	if (len >= sizeof(bname)) {
 		errno = ENAMETOOLONG;
 		return (NULL);
 	}
-	memcpy(dname, path, len);
-	dname[len] = '\0';
-	return (dname);
+	memcpy(bname, startp, len);
+	bname[len] = '\0';
+	return (bname);
 }
-#endif
+
+#endif /* !defined(HAVE_BASENAME) */

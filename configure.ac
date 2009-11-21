@@ -14,7 +14,8 @@ AC_CHECK_FUNCS([fgetln strlcat strlcpy strtonum getdirentries getdents])
 #comes from sudo's configure.in
 AC_CHECK_FUNCS(utimes, [AC_CHECK_FUNCS(futimes futimesat, [break])], [AC_CHECK_FUNCS(futime) AC_LIBOBJ(utimes)])
 
-#comes from portable openssh
+
+#from here everything comes from portable openssh configure.ac script
 AC_CHECK_DECL(LLONG_MAX, have_llong_max=1, , [#include <limits.h>])
 
 if test "$GCC" = "yes" || test "$GCC" = "egcs"; then
@@ -144,11 +145,6 @@ int main(void) {
 	)
 fi
 
-
-
-
-# this dirname check comes from portable openssh by Damien Miller
-
 dnl IRIX and Solaris 2.5.1 have dirname() in libgen
 AC_CHECK_FUNCS(dirname, [AC_CHECK_HEADERS(libgen.h)] ,[
 	AC_CHECK_LIB(gen, dirname,[
@@ -187,7 +183,9 @@ int main(int argc, char **argv) {
 	])
 ])
 
-#this optreset check comes from portable openssh by Damien Miller
+AC_SEARCH_LIBS(basename, gen, AC_DEFINE(HAVE_BASENAME, 1,
+	[Define if you have the basename function.]))
+
 AC_CACHE_CHECK([whether getopt has optreset support],
 		ac_cv_have_getopt_optreset, [
 	AC_TRY_LINK(

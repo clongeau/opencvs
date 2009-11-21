@@ -19,7 +19,7 @@
 
 /* OPENBSD ORIGINAL: lib/libc/stdlib/strtonum.c */
 
-#include "compat.h"
+#include "config.h"
 
 #ifndef HAVE_STRTONUM
 #include <stdlib.h>

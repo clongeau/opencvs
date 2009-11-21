@@ -1,4 +1,4 @@
-/*	$OpenBSD: file.c,v 1.212 2008/01/31 21:56:34 tobias Exp $	*/
+/*	$OpenBSD: file.c,v 1.215 2008/02/04 18:23:58 tobias Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
@@ -29,6 +29,7 @@
 #include <sys/types.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 
 #include <errno.h>
 #include <fcntl.h>
@@ -78,6 +79,7 @@ static const char *cvs_ign_std[] = {
 char *cvs_directory_tag = NULL;
 struct ignore_head cvs_ign_pats;
 struct ignore_head dir_ign_pats;
+struct ignore_head checkout_ign_pats;
 
 void
 cvs_file_init(void)
@@ -88,6 +90,7 @@ cvs_file_init(void)
 
 	TAILQ_INIT(&cvs_ign_pats);
 	TAILQ_INIT(&dir_ign_pats);
+	TAILQ_INIT(&checkout_ign_pats);
 
 	/* standard patterns to ignore */
 	for (i = 0; i < (int)(sizeof(cvs_ign_std)/sizeof(char *)); i++)
@@ -160,6 +163,14 @@ cvs_file_chkign(const char *file)
 	}
 
 	TAILQ_FOREACH(ip, &dir_ign_pats, ip_list) {
+		if (ip->ip_flags & CVS_IGN_STATIC) {
+			if (cvs_file_cmpname(file, ip->ip_pat) == 0)
+				return (1);
+		} else if (fnmatch(ip->ip_pat, file, flags) == 0)
+			return (1);
+	}
+
+	TAILQ_FOREACH(ip, &checkout_ign_pats, ip_list) {
 		if (ip->ip_flags & CVS_IGN_STATIC) {
 			if (cvs_file_cmpname(file, ip->ip_pat) == 0)
 				return (1);
@@ -579,7 +590,7 @@ walkrepo:
 		cr->leavedir(cf);
 
 	if (cvs_directory_tag != NULL && cmdp->cmd_flags & CVS_USE_WDIR) {
-		cvs_write_tagfile(cf->file_path, cvs_directory_tag, NULL, 0);
+		cvs_write_tagfile(cf->file_path, cvs_directory_tag, NULL);
 		xfree(cvs_directory_tag);
 		cvs_directory_tag = NULL;
 	}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cvs.h,v 1.150 2008/02/01 17:18:59 tobias Exp $	*/
+/*	$OpenBSD: cvs.h,v 1.154 2008/02/04 18:23:58 tobias Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -288,6 +288,10 @@ typedef struct cvs_entries {
 	TAILQ_HEAD(, cvs_ent_line)	 cef_ent;
 } CVSENTRIES;
 
+extern struct module_checkout *current_module;
+extern char *module_repo_root;
+
+extern struct ignore_head checkout_ign_pats;
 extern struct cvs_wklhead temp_files;
 extern volatile sig_atomic_t sig_received;
 extern volatile sig_atomic_t cvs_quit;
@@ -316,6 +320,7 @@ extern int  cvs_readonlyfs;
 extern int  cvs_error;
 extern int  cvs_server_active;
 extern int  reset_stickies;
+extern int  kflag;
 
 extern struct cvs_cmd *cmdp;
 extern struct cvs_cmd *cvs_cdt[];
@@ -369,7 +374,7 @@ void	 	cvs_ent_remove(CVSENTRIES *, const char *);
 void	 	cvs_ent_close(CVSENTRIES *, int);
 void		cvs_ent_free(struct cvs_ent *);
 void		cvs_parse_tagfile(char *, char **, char **, int *);
-void		cvs_write_tagfile(const char *, char *, char *, int);
+void		cvs_write_tagfile(const char *, char *, char *);
 
 /* root.c */
 struct cvsroot	*cvsroot_get(const char *);

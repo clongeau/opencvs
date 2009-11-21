@@ -29,8 +29,6 @@
 # include "utime.h"
 #endif
 
-#include "compat.h"
-
 #ifndef HAVE_UTIMES
 /*
  * Emulate utimes() via utime()

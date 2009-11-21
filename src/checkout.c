@@ -1,4 +1,4 @@
-/*	$OpenBSD: checkout.c,v 1.115 2008/01/31 19:51:40 xsa Exp $	*/
+/*	$OpenBSD: checkout.c,v 1.126 2008/02/04 19:08:32 joris Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -17,6 +17,7 @@
 
 #include <sys/param.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 
 #include <errno.h>
 #include <fcntl.h>
@@ -37,6 +38,8 @@ extern int prune_dirs;
 extern int build_dirs;
 
 static int flags = CR_REPO | CR_RECURSE_DIRS;
+static char *dflag = NULL;
+static char *koptstr = NULL;
 
 struct cvs_cmd cvs_cmd_checkout = {
 	CVS_OP_CHECKOUT, CVS_USE_WDIR, "checkout",
@@ -68,6 +71,20 @@ cvs_checkout(int argc, char **argv)
 		switch (ch) {
 		case 'A':
 			reset_stickies = 1;
+			break;
+		case 'd':
+			if (dflag != NULL)
+				fatal("-d specified two or more times");
+			dflag = optarg;
+			break;
+		case 'k':
+			koptstr = optarg;
+			kflag = rcs_kflag_get(koptstr);
+			if (RCS_KWEXP_INVAL(kflag)) {
+				cvs_log(LP_ERR,
+				    "invalid RCS keyword expension mode");
+				fatal("%s", cvs_cmd_add.cmd_synopsis);
+			}
 			break;
 		case 'l':
 			flags &= ~CR_RECURSE_DIRS;
@@ -113,6 +130,15 @@ cvs_export(int argc, char **argv)
 
 	while ((ch = getopt(argc, argv, cvs_cmd_export.cmd_opts)) != -1) {
 		switch (ch) {
+		case 'k':
+			koptstr = optarg;
+			kflag = rcs_kflag_get(koptstr);
+			if (RCS_KWEXP_INVAL(kflag)) {
+				cvs_log(LP_ERR,
+				    "invalid RCS keyword expension mode");
+				fatal("%s", cvs_cmd_add.cmd_synopsis);
+			}
+			break;
 		case 'l':
 			flags &= ~CR_RECURSE_DIRS;
 			break;
@@ -145,8 +171,12 @@ static void
 checkout_check_repository(int argc, char **argv)
 {
 	int i;
-	char repo[MAXPATHLEN];
+	char *wdir, *d;
 	struct cvs_recursion cr;
+	struct module_checkout *mc;
+	struct cvs_ignpat *ip;
+	struct cvs_filelist *fl, *nxt;
+	char repo[MAXPATHLEN], fpath[MAXPATHLEN], *f[1];
 
 	build_dirs = print_stdout ? 0 : 1;
 
@@ -158,6 +188,12 @@ checkout_check_repository(int argc, char **argv)
 			    cvs_specified_tag);
 		if (reset_stickies == 1)
 			cvs_client_send_request("Argument -A");
+
+		if (kflag)
+			cvs_client_send_request("Argument -k%s", koptstr);
+
+		if (dflag != NULL)
+			cvs_client_send_request("Argument -d%s", dflag);
 
 		if (!(flags & CR_RECURSE_DIRS))
 			cvs_client_send_request("Argument -l");
@@ -195,26 +231,83 @@ checkout_check_repository(int argc, char **argv)
 	cvs_directory_tag = cvs_specified_tag;
 
 	for (i = 0; i < argc; i++) {
-		(void)xsnprintf(repo, sizeof(repo), "%s/%s",
-		    current_cvsroot->cr_dir, argv[i]);
+		mc = cvs_module_lookup(argv[i]);
+		current_module = mc;
 
-		switch (checkout_classify(repo, argv[i])) {
-		case CVS_FILE:
-			cr.fileproc = cvs_update_local;
-			cr.flags = flags;
+		TAILQ_FOREACH(fl, &(mc->mc_ignores), flist)
+			cvs_file_ignore(fl->file_path, &checkout_ign_pats);
 
-			if (build_dirs == 1)
-				cvs_mkpath(dirname(argv[i]), cvs_specified_tag);
-			cvs_file_run(1, &(argv[i]), &cr);
-			break;
-		case CVS_DIR:
-			if (build_dirs == 1)
-				cvs_mkpath(argv[i], cvs_specified_tag);
-			checkout_repository(repo, argv[i]);
-			break;
-		default:
-			break;
+		TAILQ_FOREACH(fl, &(mc->mc_modules), flist) {
+			(void)xsnprintf(repo, sizeof(repo), "%s/%s",
+			    current_cvsroot->cr_dir, fl->file_path);
+
+			if (!(mc->mc_flags & MODULE_ALIAS) || dflag != NULL)
+				module_repo_root = fl->file_path;
+
+			if (mc->mc_flags & MODULE_NORECURSE)
+				flags &= ~CR_RECURSE_DIRS;
+
+			if (dflag != NULL)
+				wdir = dflag;
+			else if (mc->mc_flags & MODULE_ALIAS)
+				wdir = fl->file_path;
+			else
+				wdir = mc->mc_name;
+
+			switch (checkout_classify(repo, fl->file_path)) {
+			case CVS_FILE:
+				cr.fileproc = cvs_update_local;
+				cr.flags = flags;
+
+				if (!(mc->mc_flags & MODULE_ALIAS)) {
+					module_repo_root =
+					    dirname(fl->file_path);
+					d = wdir;
+					(void)xsnprintf(fpath, sizeof(fpath),
+					    "%s/%s", d,
+					    basename(fl->file_path));
+				} else {
+					d = dirname(wdir);
+					strlcpy(fpath, fl->file_path,
+					    sizeof(fpath));
+				}
+
+				if (build_dirs == 1)
+					cvs_mkpath(d, cvs_specified_tag);
+
+				f[0] = fpath;
+				cvs_file_run(1, f, &cr);
+				break;
+			case CVS_DIR:
+				if (build_dirs == 1)
+					cvs_mkpath(wdir, cvs_specified_tag);
+				checkout_repository(repo, wdir);
+				break;
+			default:
+				break;
+			}
+
+			if (mc->mc_prog != NULL &&
+			    mc->mc_flags & MODULE_RUN_ON_COMMIT)
+				cvs_exec(mc->mc_prog);
 		}
+
+		if (mc->mc_canfree == 1) {
+			for (fl = TAILQ_FIRST(&(mc->mc_modules));
+			    fl != TAILQ_END(&(mc->mc_modules)); fl = nxt) {
+				nxt = TAILQ_NEXT(fl, flist);
+				TAILQ_REMOVE(&(mc->mc_modules), fl, flist);
+				xfree(fl->file_path);
+				xfree(fl);
+			}
+		}
+
+		while ((ip = TAILQ_FIRST(&checkout_ign_pats)) != NULL) {
+			TAILQ_REMOVE(&checkout_ign_pats, ip, ip_list);
+			xfree(ip);
+		}
+
+		xfree(mc);
 	}
 }
 
@@ -225,11 +318,8 @@ checkout_classify(const char *repo, const char *arg)
 	struct stat sb;
 
 	if (stat(repo, &sb) == 0) {
-		if (!S_ISDIR(sb.st_mode)) {
-			cvs_log(LP_ERR, "ignoring %s: not a directory", arg);
-			return 0;
-		}
-		return CVS_DIR;
+		if (S_ISDIR(sb.st_mode))
+			return CVS_DIR;
 	}
 
 	d = dirname(repo);
@@ -275,7 +365,7 @@ checkout_repository(const char *repobase, const char *wdbase)
 		cr.leavedir = NULL;
 	} else {
 		cr.enterdir = cvs_update_enterdir;
-		cr.leavedir = cvs_update_leavedir;
+		cr.leavedir = prune_dirs ? cvs_update_leavedir : NULL;
 	}
 	cr.fileproc = cvs_update_local;
 	cr.flags = flags;
@@ -296,7 +386,7 @@ checkout_repository(const char *repobase, const char *wdbase)
 void
 cvs_checkout_file(struct cvs_file *cf, RCSNUM *rnum, char *tag, int co_flags)
 {
-	int kflag, oflags, exists;
+	int cf_kflag, oflags, exists;
 	time_t rcstime;
 	CVSENTRIES *ent;
 	struct timeval tv[2];
@@ -386,14 +476,14 @@ cvs_checkout_file(struct cvs_file *cf, RCSNUM *rnum, char *tag, int co_flags)
 		sticky[0] = '\0';
 
 	kbuf[0] = '\0';
-	if (cf->file_ent != NULL) {
-		if (cf->file_ent->ce_opts != NULL)
-			strlcpy(kbuf, cf->file_ent->ce_opts, sizeof(kbuf));
-	} else if (cf->file_rcs->rf_expand != NULL) {
-		kflag = rcs_kflag_get(cf->file_rcs->rf_expand);
-		if (!(kflag & RCS_KWEXP_DEFAULT))
+	if (cf->file_rcs->rf_expand != NULL) {
+		cf_kflag = rcs_kflag_get(cf->file_rcs->rf_expand);
+		if (kflag || cf_kflag != RCS_KWEXP_DEFAULT)
 			(void)xsnprintf(kbuf, sizeof(kbuf),
 			    "-k%s", cf->file_rcs->rf_expand);
+	} else if (!reset_stickies && cf->file_ent != NULL) {
+		if (cf->file_ent->ce_opts != NULL)
+			strlcpy(kbuf, cf->file_ent->ce_opts, sizeof(kbuf));
 	}
 
 	(void)xsnprintf(entry, CVS_ENT_MAXLINELEN, "/%s/%s/%s/%s/%s",

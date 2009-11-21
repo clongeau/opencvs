@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.129 2008/01/31 22:11:38 joris Exp $	*/
+/*	$OpenBSD: util.c,v 1.132 2008/02/04 19:08:32 joris Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * Copyright (c) 2005, 2006 Joris Vink <joris@openbsd.org>
@@ -32,6 +32,7 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
+#include <paths.h>
 #include <unistd.h>
 
 #include "cvs.h"
@@ -512,16 +513,16 @@ cvs_get_repository_name(const char *dir, char *dst, size_t len)
 
 void
 cvs_mkadmin(const char *path, const char *root, const char *repo,
-    char *tag, char *date, int nb)
+    char *tag, char *date)
 {
 	FILE *fp;
 	struct stat st;
 	char buf[MAXPATHLEN];
 
 	if (cvs_server_active == 0)
-		cvs_log(LP_TRACE, "cvs_mkadmin(%s, %s, %s, %s, %s, %d)",
+		cvs_log(LP_TRACE, "cvs_mkadmin(%s, %s, %s, %s, %s)",
 		    path, root, repo, (tag != NULL) ? tag : "",
-		    (date != NULL) ? date : "", nb);
+		    (date != NULL) ? date : "");
 
 	(void)xsnprintf(buf, sizeof(buf), "%s/%s", path, CVS_PATH_CVSDIR);
 
@@ -553,7 +554,7 @@ cvs_mkadmin(const char *path, const char *root, const char *repo,
 		fatal("cvs_mkadmin: %s: %s", buf, strerror(errno));
 	(void)fclose(fp);
 
-	cvs_write_tagfile(path, tag, date, nb);
+	cvs_write_tagfile(path, tag, date);
 }
 
 void
@@ -589,15 +590,21 @@ cvs_mkpath(const char *path, char *tag)
 		if (dp != NULL)
 			*(dp++) = '\0';
 
-		if (repo[0] != '\0') {
-			len = strlcat(repo, "/", sizeof(repo));
+		if (sp == dir && module_repo_root != NULL) {
+			len = strlcpy(repo, module_repo_root, sizeof(repo));
+			if (len >= (int)sizeof(repo))
+				fatal("cvs_mkpath: overflow");
+		} else {
+			if (repo[0] != '\0') {
+				len = strlcat(repo, "/", sizeof(repo));
+				if (len >= (int)sizeof(repo))
+					fatal("cvs_mkpath: overflow");
+			}
+
+			len = strlcat(repo, sp, sizeof(repo));
 			if (len >= (int)sizeof(repo))
 				fatal("cvs_mkpath: overflow");
 		}
-
-		len = strlcat(repo, sp, sizeof(repo));
-		if (len >= (int)sizeof(repo))
-			fatal("cvs_mkpath: overflow");
 
 		if (rpath[0] != '\0') {
 			len = strlcat(rpath, "/", sizeof(rpath));
@@ -616,7 +623,7 @@ cvs_mkpath(const char *path, char *tag)
 			continue;
 
 		cvs_mkadmin(rpath, current_cvsroot->cr_str, repo,
-		    tag, NULL, 0);
+		    tag, NULL);
 
 		if (dp != NULL) {
 			if ((p = strchr(dp, '/')) != NULL)
@@ -816,4 +823,22 @@ cvs_yesno(void)
 			c = getchar();
 
 	return (ret);
+}
+
+void
+cvs_exec(const char *prog)
+{
+	pid_t pid;
+	char *argp[] = { "sh", "-c", NULL, NULL };
+
+	argp[2] = prog;
+
+	if ((pid = fork()) == -1) {
+		cvs_log(LP_ERR, "cvs_exec: fork failed");
+		return;
+	} else if (pid == 0) {
+		execv(_PATH_BSHELL, argp);
+		cvs_log(LP_ERR, "failed to run '%s'", prog);
+		_exit(127);
+	}
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcs.c,v 1.243 2008/01/31 22:19:36 tobias Exp $	*/
+/*	$OpenBSD: rcs.c,v 1.245 2008/02/03 16:59:11 tobias Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.

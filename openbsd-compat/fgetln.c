@@ -29,11 +29,12 @@
 
 /* OPENBSD ORIGINAL: usr.bin/make/util.c */
 
+#include "config.h"
+
 #ifndef HAVE_FGETLN
 
 #include "compat.h"
 #include "xmalloc.h"
-
 
 char *
 fgetln(stream, len)

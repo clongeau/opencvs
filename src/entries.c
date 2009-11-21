@@ -1,4 +1,4 @@
-/*	$OpenBSD: entries.c,v 1.86 2008/01/10 10:09:27 tobias Exp $	*/
+/*	$OpenBSD: entries.c,v 1.88 2008/02/04 18:23:58 tobias Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -74,7 +74,11 @@ cvs_ent_open(const char *dir)
 		while (fgets(buf, sizeof(buf), fp)) {
 			buf[strcspn(buf, "\n")] = '\0';
 
-			p = &buf[1];
+			if (strlen(buf) < 2)
+				fatal("cvs_ent_open: %s: malformed line %s",
+				    ep->cef_lpath, buf);
+
+			p = &buf[2];
 
 			if (buf[0] == 'A') {
 				line = xmalloc(sizeof(*line));
@@ -275,7 +279,7 @@ cvs_ent_add(CVSENTRIES *ep, const char *line)
 		fatal("cvs_ent_add: fopen: `%s': %s",
 		    ep->cef_lpath, strerror(errno));
 
-	fputc('A', fp);
+	fputs("A ", fp);
 	fputs(line, fp);
 	fputc('\n', fp);
 
@@ -303,7 +307,7 @@ cvs_ent_remove(CVSENTRIES *ep, const char *name)
 		fatal("cvs_ent_remove: fopen: `%s': %s", ep->cef_lpath,
 		    strerror(errno));
 
-	fputc('R', fp);
+	fputs("R ", fp);
 	fputs(l->buf, fp);
 	fputc('\n', fp);
 
@@ -418,12 +422,16 @@ cvs_parse_tagfile(char *dir, char **tagp, char **datep, int *nbp)
 }
 
 void
-cvs_write_tagfile(const char *dir, char *tag, char *date, int nb)
+cvs_write_tagfile(const char *dir, char *tag, char *date)
 {
 	FILE *fp;
+	RCSNUM *rev;
 	char tagpath[MAXPATHLEN];
 	char sticky[CVS_REV_BUFSZ];
 	int i;
+
+	cvs_log(LP_TRACE, "cvs_write_tagfile(%s, %s, %s)", dir,
+	    tag != NULL ? tag : "", date != NULL ? date : "");
 
 	if (cvs_noexec == 1)
 		return;
@@ -442,9 +450,10 @@ cvs_write_tagfile(const char *dir, char *tag, char *date, int nb)
 		}
 
 		if (tag != NULL) {
-			if (nb != 0) {
+			if ((rev = rcsnum_parse(tag)) != NULL) {
 				(void)xsnprintf(sticky, sizeof(sticky),
 				    "N%s", tag);
+				rcsnum_free(rev);
 			} else {
 				(void)xsnprintf(sticky, sizeof(sticky),
 				    "T%s", tag);

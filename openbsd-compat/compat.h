@@ -71,6 +71,14 @@ size_t strlcat(char *dst, const char *src, size_t size);
 char * fgetln(FILE *stream, size_t *len);
 #endif
 
+#ifndef HAVE_DIRNAME
+char *dirname(const char *path);
+#endif
+
+#ifndef HAVE_STRSEP
+char *strsep(char **stringp, const char *delim);
+#endif
+
 #if !defined(HAVE_GETOPT) || !defined(HAVE_GETOPT_OPTRESET)
 int BSDgetopt(int argc, char * const *argv, const char *opts);
 char	*BSDoptarg;		/* argument associated with option */

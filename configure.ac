@@ -50,6 +50,17 @@ AC_CHECK_FUNCS(utimes, [AC_CHECK_FUNCS(futimes futimesat, [break])], [AC_CHECK_F
 
 # taken from portable openssh configure.ac
 
+dnl Make sure prototypes are defined for these before using them.
+AC_CHECK_DECL(strsep,
+	[AC_CHECK_FUNCS(strsep)],
+	[],
+	[
+#ifdef HAVE_STRING_H
+# include <string.h>
+#endif
+	])
+
+
 AC_CHECK_DECL(LLONG_MAX, have_llong_max=1, , [#include <limits.h>])
 
 if test "$GCC" = "yes" || test "$GCC" = "egcs"; then

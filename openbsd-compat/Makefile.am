@@ -1,7 +1,12 @@
 noinst_LIBRARIES = libopenbsd-compat.a
 
 libopenbsd_compat_a_SOURCES = \
-		  fgetln.c strlcat.c strlcpy.c strtonum.c md5.c md5_helper.c \
-		  basename.c dirname.c utimes.c getopt.c
+		basename.c dirname.c \
+		fgetln.c \
+		getopt.c \
+		md5.c md5_helper.c \
+		strlcat.c strlcpy.c \
+		strsep.c strtonum.c \
+		utimes.c
 
 INCLUDES = -I$(top_srcdir)/src/

@@ -29,6 +29,8 @@
 
 /* OPENBSD ORIGINAL: lib/libc/stdlib/getopt.c */
 
+#include "config.h"
+
 #if !defined(HAVE_GETOPT) || !defined(HAVE_GETOPT_OPTRESET)
 
 #if defined(LIBC_SCCS) && !defined(lint)

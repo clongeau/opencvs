@@ -27,7 +27,7 @@
 #include <compat.h>
 #include "error.h"
 
-#ifndef lint
+#if 0
 __unused static const char rcsid[] = "$Sudo: error.c,v 1.7 2005/11/18 01:39:58 millert Exp $";
 #endif /* lint */
 

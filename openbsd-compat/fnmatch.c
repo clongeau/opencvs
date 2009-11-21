@@ -59,7 +59,7 @@
 #define	RANGE_NOMATCH	0
 #define	RANGE_ERROR	(-1)
 
-#if defined(LIBC_SCCS) && !defined(lint)
+#if 0
 __unused static const char rcsid[] = "$OpenBSD: fnmatch.c,v 1.6 1998/03/19 00:29:59 millert Exp $";
 #endif /* LIBC_SCCS and not lint */
 

@@ -1,3 +1,9 @@
+2008-07-12  chl  <chl@tuxfamily.org>
+
+	* openbsd-compat/fnmatch.c: 
+	* openbsd-compat/error.c: 
+	- remove __unused usage by adding #if 0 around.
+
 2008-07-10  chl  <chl@tuxfamily.org>
 
 	- deal with missing err.h header, and associated functions

@@ -1,4 +1,4 @@
-/*	$OpenBSD: file.c,v 1.220 2008/02/10 10:21:42 joris Exp $	*/
+/*	$OpenBSD: file.c,v 1.234 2008/03/09 03:14:52 joris Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
@@ -197,7 +197,7 @@ cvs_file_run(int argc, char **argv, struct cvs_recursion *cr)
 }
 
 struct cvs_filelist *
-cvs_file_get(const char *name, int check_dir_tag, struct cvs_flisthead *fl)
+cvs_file_get(const char *name, int user_supplied, struct cvs_flisthead *fl)
 {
 	const char *p;
 	struct cvs_filelist *l;
@@ -211,14 +211,15 @@ cvs_file_get(const char *name, int check_dir_tag, struct cvs_flisthead *fl)
 
 	l = (struct cvs_filelist *)xmalloc(sizeof(*l));
 	l->file_path = xstrdup(p);
-	l->check_dir_tag = check_dir_tag;
+	l->user_supplied = user_supplied;
 
 	TAILQ_INSERT_TAIL(fl, l, flist);
 	return (l);
 }
 
 struct cvs_file *
-cvs_file_get_cf(const char *d, const char *f, int fd, int type)
+cvs_file_get_cf(const char *d, const char *f, int fd,
+	int type, int user_supplied)
 {
 	struct cvs_file *cf;
 	char *p, rpath[MAXPATHLEN];
@@ -237,6 +238,8 @@ cvs_file_get_cf(const char *d, const char *f, int fd, int type)
 	cf->repo_fd = -1;
 	cf->file_type = type;
 	cf->file_status = cf->file_flags = 0;
+	cf->user_supplied = user_supplied;
+	cf->in_attic = 0;
 	cf->file_ent = NULL;
 
 #if !defined(HAVE_GETDIRENTRIES) && !defined(HAVE_GETDENTS)
@@ -244,6 +247,10 @@ cvs_file_get_cf(const char *d, const char *f, int fd, int type)
 		if ((cf->dir = opendir(cf->file_path)) == NULL)
 			fatal("cvs_file_get_cf: opendir failed on '%s'", cf->file_path);
 #endif
+
+	if (current_cvsroot->cr_method != CVS_METHOD_LOCAL ||
+	    cvs_server_active == 1)
+		cvs_validate_directory(cf->file_path);
 
 	return (cf);
 }
@@ -324,38 +331,45 @@ cvs_file_walklist(struct cvs_flisthead *fl, struct cvs_recursion *cr)
 					(void)close(fd);
 					goto next;
 				}
-			
+
 				/* this file is not in our working copy yet */
 				(void)close(fd);
 				fd = -1;
 			}
 		}
 
-		cf = cvs_file_get_cf(d, f, fd, type);
+		cf = cvs_file_get_cf(d, f, fd, type, l->user_supplied);
 		if (cf->file_type == CVS_DIR) {
 			cvs_file_walkdir(cf, cr);
 		} else {
-			if (l->check_dir_tag) {
+			if (l->user_supplied) {
 				cvs_parse_tagfile(cf->file_wd,
 				    &cvs_directory_tag, NULL, NULL);
 
 				if (cvs_directory_tag == NULL &&
 				    cvs_specified_tag != NULL)
 					cvs_directory_tag = cvs_specified_tag;
+
+				if (current_cvsroot->cr_method ==
+				    CVS_METHOD_LOCAL) {
+					cvs_get_repository_path(cf->file_wd,
+					    repo, MAXPATHLEN);
+					cvs_repository_lock(repo,
+					    (cmdp->cmd_flags & CVS_LOCK_REPO));
+				}
 			}
 
 			if (cr->fileproc != NULL)
 				cr->fileproc(cf);
+
+			if (l->user_supplied && cmdp->cmd_flags & CVS_LOCK_REPO)
+				cvs_repository_unlock(repo);
 		}
 
 		cvs_file_free(cf);
 
 next:
 		nxt = TAILQ_NEXT(l, flist);
-		TAILQ_REMOVE(fl, l, flist);
-
-		xfree(l->file_path);
-		xfree(l);
 	}
 }
 
@@ -433,6 +447,9 @@ cvs_file_walkdir(struct cvs_file *cf, struct cvs_recursion *cr)
 		fatal("cvs_file_walkdir: %s %s", cf->file_path,
 		    strerror(errno));
 
+	if (st.st_size > SIZE_MAX)
+		fatal("cvs_file_walkdir: %s: file size too big", cf->file_name);
+
 	bufsize = st.st_size;
 	if (bufsize < st.st_blksize)
 		bufsize = st.st_blksize;
@@ -441,10 +458,10 @@ cvs_file_walkdir(struct cvs_file *cf, struct cvs_recursion *cr)
 	TAILQ_INIT(&fl);
 	TAILQ_INIT(&dl);
 
-#if   defined(HAVE_GETDIRENTRIES)
-	while ((nbytes = getdirentries(cf->fd, buf, bufsize, &base)) > 0) {
-#elif defined(HAVE_GETDENTS)
+#if   defined(HAVE_GETDENTS)
 	while ((nbytes = getdents(cf->fd, buf, bufsize)) > 0) {
+#elif defined(HAVE_GETDIRENTRIES)
+	while ((nbytes = getdirentries(cf->fd, buf, bufsize, &base)) > 0) {
 #else
 	nbytes = sizeof(buf[0]);
 	while ((buf[0] = readdir(cf->dir)) != NULL) {
@@ -565,10 +582,12 @@ cvs_file_walkdir(struct cvs_file *cf, struct cvs_recursion *cr)
 	cvs_ent_close(entlist, ENT_NOSYNC);
 
 walkrepo:
-	if (cr->flags & CR_REPO) {
+	if (current_cvsroot->cr_method == CVS_METHOD_LOCAL) {
 		cvs_get_repository_path(cf->file_path, repo, MAXPATHLEN);
-		cvs_repository_lock(repo);
+		cvs_repository_lock(repo, (cmdp->cmd_flags & CVS_LOCK_REPO));
+	}
 
+	if (cr->flags & CR_REPO) {
 		xsnprintf(fpath, sizeof(fpath), "%s/%s", cf->file_path,
 		    CVS_PATH_STATICENTRIES);
 
@@ -580,7 +599,8 @@ walkrepo:
 	cvs_file_walklist(&fl, cr);
 	cvs_file_freelist(&fl);
 
-	if (cr->flags & CR_REPO)
+	if (current_cvsroot->cr_method == CVS_METHOD_LOCAL &&
+	    (cmdp->cmd_flags & CVS_LOCK_REPO))
 		cvs_repository_unlock(repo);
 
 	cvs_file_walklist(&dl, cr);
@@ -738,9 +758,8 @@ cvs_file_classify(struct cvs_file *cf, const char *tag)
 
 	if (cf->file_ent != NULL)
 		rcsnum_tostr(cf->file_ent->ce_rev, r1, sizeof(r1));
-	if (cf->file_rcsrev != NULL) {
+	if (cf->file_rcsrev != NULL)
 		rcsnum_tostr(cf->file_rcsrev, r2, sizeof(r2));
-	}
 
 	ismodified = rcsdead = 0;
 	if (cf->fd != -1 && cf->file_ent != NULL) {
@@ -759,14 +778,10 @@ cvs_file_classify(struct cvs_file *cf, const char *tag)
 	}
 
 	if (ismodified == 1 && cf->fd != -1 && cf->file_rcs != NULL &&
-	    cf->file_rcsrev != NULL && !RCSNUM_ISBRANCH(cf->file_rcsrev)) {
-		b1 = rcs_rev_getbuf(cf->file_rcs, cf->file_rcsrev, 0);
-		if (b1 == NULL)
-			fatal("failed to get HEAD revision for comparison");
-
-		b2 = cvs_buf_load_fd(cf->fd, BUF_AUTOEXT);
-		if (b2 == NULL)
-			fatal("failed to get file content for comparison");
+	    cf->file_ent != NULL && !RCSNUM_ISBRANCH(cf->file_ent->ce_rev) &&
+	    cf->file_ent->ce_status != CVS_ENT_ADDED) {
+		b1 = rcs_rev_getbuf(cf->file_rcs, cf->file_ent->ce_rev, 0);
+		b2 = cvs_buf_load_fd(cf->fd);
 
 		if (cvs_buf_differ(b1, b2))
 			ismodified = 1;
@@ -987,10 +1002,10 @@ cvs_file_cmp(const char *file1, const char *file2)
 	if (S_ISREG(stb1.st_mode)) {
 		void *p1, *p2;
 
-		if (stb1.st_size > (off_t)SIZE_MAX) {
+		if (stb1.st_size > SIZE_MAX) {
 			ret = 1;
 			goto out;
-		}	
+		}
 
 		if ((p1 = mmap(NULL, stb1.st_size, PROT_READ,
 		    MAP_FILE, fd1, (off_t)0)) == MAP_FAILED)
@@ -1046,10 +1061,10 @@ cvs_file_copy(const char *from, const char *to)
 		char *p;
 		int saved_errno;
 
-		if (st.st_size > (off_t)SIZE_MAX) {
+		if (st.st_size > SIZE_MAX) {
 			ret = -1;
 			goto out;
-		}	
+		}
 
 		if ((dst = open(to, O_CREAT|O_TRUNC|O_WRONLY,
 		    st.st_mode & (S_IRWXU|S_IRWXG|S_IRWXO))) == -1)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: import.c,v 1.82 2008/02/04 15:07:33 tobias Exp $	*/
+/*	$OpenBSD: import.c,v 1.87 2008/03/01 20:49:44 joris Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -230,8 +230,7 @@ import_new(struct cvs_file *cf)
 	if ((branch = rcsnum_parse(import_branch)) == NULL)
 		fatal("import_new: failed to parse branch");
 
-	if ((bp = cvs_buf_load_fd(cf->fd, BUF_AUTOEXT)) == NULL)
-		fatal("import_new: failed to load %s", cf->file_path);
+	bp = cvs_buf_load_fd(cf->fd);
 
 	if ((brev = rcsnum_brtorev(branch)) == NULL)
 		fatal("import_new: failed to get first branch revision");
@@ -293,16 +292,14 @@ import_update(struct cvs_file *cf)
 	cvs_log(LP_TRACE, "import_update(%s)", cf->file_path);
 
 	if ((rev = rcs_translate_tag(import_branch, cf->file_rcs)) == NULL)
-		fatal("import_update: could not translate tag `%s'", import_branch);
+		fatal("import_update: could not translate tag `%s'",
+		    import_branch);
 
 	if ((brev = rcsnum_parse(import_branch)) == NULL)
 		fatal("import_update: rcsnum_parse failed");
 
-	if ((b1 = rcs_rev_getbuf(cf->file_rcs, rev, RCS_KWEXP_NONE)) == NULL)
-		fatal("import_update: failed to grab revision");
-
-	if ((b2 = cvs_buf_load_fd(cf->fd, BUF_AUTOEXT)) == NULL)
-		fatal("import_update: failed to load %s", cf->file_path);
+	b1 = rcs_rev_getbuf(cf->file_rcs, rev, RCS_KWEXP_NONE);
+	b2 = cvs_buf_load_fd(cf->fd);
 
 	ret = cvs_buf_differ(b1, b2);
 	cvs_buf_free(b1);
@@ -310,12 +307,25 @@ import_update(struct cvs_file *cf)
 	if (ret == 0) {
 		import_tag(cf, brev, rev);
 		rcsnum_free(brev);
-		rcs_write(cf->file_rcs);
+		if (cvs_noexec != 1)
+			rcs_write(cf->file_rcs);
+		cvs_printf("U %s/%s\n", import_repository, cf->file_path);
 		return;
 	}
 
 	if (cf->file_rcs->rf_branch != NULL)
 		rcsnum_tostr(cf->file_rcs->rf_branch, branch, sizeof(branch));
+
+	if (cf->file_rcs->rf_branch == NULL || cf->in_attic == 1 ||
+	    strcmp(branch, import_branch)) {
+		import_conflicts++;
+		cvs_printf("C %s/%s\n", import_repository, cf->file_path);
+	} else {
+		cvs_printf("U %s/%s\n", import_repository, cf->file_path);
+	}
+
+	if (cvs_noexec == 1)
+		return;
 
 	d = import_get_rcsdiff(cf, rev);
 	newrev = rcsnum_inc(rev);
@@ -327,14 +337,6 @@ import_update(struct cvs_file *cf)
 		fatal("import_update: failed to set deltatext");
 
 	import_tag(cf, brev, newrev);
-
-	if (cf->file_rcs->rf_branch == NULL || cf->in_attic == 1 ||
-	    strcmp(branch, import_branch)) {
-		import_conflicts++;
-		cvs_printf("C %s/%s\n", import_repository, cf->file_path);
-	} else {
-		cvs_printf("U %s/%s\n", import_repository, cf->file_path);
-	}
 
 	if (kflag)
 		rcs_kwexp_set(cf->file_rcs, kflag);
@@ -362,31 +364,31 @@ import_get_rcsdiff(struct cvs_file *cf, RCSNUM *rev)
 {
 	char *p1, *p2;
 	BUF *b1, *b2;
+	int fd1, fd2;
 
-	b2 = cvs_buf_alloc(128, BUF_AUTOEXT);
+	b2 = cvs_buf_alloc(128);
 
-	if (cvs_noexec != 1) {
-		if ((b1 = cvs_buf_load_fd(cf->fd, BUF_AUTOEXT)) == NULL)
-			fatal("import_get_rcsdiff: failed loading %s",
-			    cf->file_path);
+	b1 = cvs_buf_load_fd(cf->fd);
 
-		(void)xasprintf(&p1, "%s/diff1.XXXXXXXXXX", cvs_tmpdir);
-		cvs_buf_write_stmp(b1, p1, NULL);
-		cvs_buf_free(b1);
+	(void)xasprintf(&p1, "%s/diff1.XXXXXXXXXX", cvs_tmpdir);
+	fd1 = cvs_buf_write_stmp(b1, p1, NULL);
+	cvs_buf_free(b1);
 
-		(void)xasprintf(&p2, "%s/diff2.XXXXXXXXXX", cvs_tmpdir);
-		rcs_rev_write_stmp(cf->file_rcs, rev, p2, RCS_KWEXP_NONE);
+	(void)xasprintf(&p2, "%s/diff2.XXXXXXXXXX", cvs_tmpdir);
+	fd2 = rcs_rev_write_stmp(cf->file_rcs, rev, p2, RCS_KWEXP_NONE);
 
-		diff_format = D_RCSDIFF;
-		if (cvs_diffreg(p2, p1, b2) == D_ERROR)
-			fatal("import_get_rcsdiff: failed to get RCS patch");
+	diff_format = D_RCSDIFF;
+	if (cvs_diffreg(p2, p1, fd2, fd1, b2) == D_ERROR)
+		fatal("import_get_rcsdiff: failed to get RCS patch");
 
-		(void)unlink(p1);
-		(void)unlink(p2);
+	close(fd1);
+	close(fd2);
 
-		xfree(p1);
-		xfree(p2);
-	}
+	(void)unlink(p1);
+	(void)unlink(p2);
+
+	xfree(p1);
+	xfree(p2);
 
 	return (b2);
 }

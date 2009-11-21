@@ -1,4 +1,4 @@
-/*	$OpenBSD: commit.c,v 1.127 2008/02/04 22:36:40 joris Exp $	*/
+/*	$OpenBSD: commit.c,v 1.132 2008/03/09 03:14:52 joris Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  * Copyright (c) 2006 Xavier Santolaria <xsa@openbsd.org>
@@ -29,6 +29,7 @@
 
 void	cvs_commit_local(struct cvs_file *);
 void	cvs_commit_check_files(struct cvs_file *);
+void	cvs_commit_lock_dirs(struct cvs_file *);
 
 static BUF *commit_diff(struct cvs_file *, RCSNUM *, int);
 static void commit_desc_set(struct cvs_file *);
@@ -42,7 +43,7 @@ int	conflicts_found;
 char	*logmsg = NULL;
 
 struct cvs_cmd cvs_cmd_commit = {
-	CVS_OP_COMMIT, CVS_USE_WDIR, "commit",
+	CVS_OP_COMMIT, CVS_USE_WDIR | CVS_LOCK_REPO, "commit",
 	{ "ci", "com" },
 	"Check files into the repository",
 	"[-flR] [-F logfile | -m msg] [-r rev] ...",
@@ -154,6 +155,9 @@ cvs_commit(int argc, char **argv)
 		cvs_client_send_request("ci");
 		cvs_client_get_responses();
 	} else {
+		cr.fileproc = cvs_commit_lock_dirs;
+		cvs_file_walklist(&files_affected, &cr);
+
 		cr.fileproc = cvs_commit_local;
 		cvs_file_walklist(&files_affected, &cr);
 		cvs_file_freelist(&files_affected);
@@ -167,6 +171,18 @@ cvs_commit(int argc, char **argv)
 
 	xfree(logmsg);
 	return (0);
+}
+
+void
+cvs_commit_lock_dirs(struct cvs_file *cf)
+{
+	char repo[MAXPATHLEN];
+
+	cvs_get_repository_path(cf->file_wd, repo, sizeof(repo));
+	cvs_log(LP_TRACE, "cvs_commit_lock_dirs: %s", repo);
+
+	/* locks stay in place until we are fully done and exit */
+	cvs_repository_lock(repo, 1);
 }
 
 void
@@ -210,6 +226,13 @@ cvs_commit_check_files(struct cvs_file *cf)
 	    cf->file_status == FILE_CHECKOUT ||
 	    cf->file_status == FILE_LOST) {
 		cvs_log(LP_ERR, "conflict: %s is not up-to-date",
+		    cf->file_path);
+		conflicts_found++;
+		return;
+	}
+
+	if (cf->file_ent != NULL && cf->file_ent->ce_date != -1) {
+		cvs_log(LP_ERR, "conflict: cannot commit to sticky date for %s",
 		    cf->file_path);
 		conflicts_found++;
 		return;
@@ -434,13 +457,10 @@ cvs_commit_local(struct cvs_file *cf)
 
 	if (cf->file_status == FILE_REMOVED) {
 		b = rcs_rev_getbuf(cf->file_rcs, crev, 0);
-		if (b == NULL)
-			fatal("cvs_commit_local: failed to get crev");
 	} else if (onbranch == 1) {
 		b = commit_diff(cf, crev, 1);
 	} else {
-		if ((b = cvs_buf_load_fd(cf->fd, BUF_AUTOEXT)) == NULL)
-			fatal("cvs_commit_local: failed to load file");
+		b = cvs_buf_load_fd(cf->fd);
 	}
 
 	if (isnew == 0 && onbranch == 0) {
@@ -543,6 +563,7 @@ cvs_commit_local(struct cvs_file *cf)
 static BUF *
 commit_diff(struct cvs_file *cf, RCSNUM *rev, int reverse)
 {
+	int fd1, fd2, f;
 	char *p1, *p2, *p;
 	BUF *b;
 
@@ -550,20 +571,17 @@ commit_diff(struct cvs_file *cf, RCSNUM *rev, int reverse)
 
 	if (cf->file_status == FILE_MODIFIED ||
 	    cf->file_status == FILE_ADDED) {
-		if ((b = cvs_buf_load_fd(cf->fd, BUF_AUTOEXT)) == NULL)
-			fatal("commit_diff: failed to load '%s'",
-			    cf->file_path);
-		cvs_buf_write_stmp(b, p1, NULL);
+		b = cvs_buf_load_fd(cf->fd);
+		fd1 = cvs_buf_write_stmp(b, p1, NULL);
 		cvs_buf_free(b);
 	} else {
-		rcs_rev_write_stmp(cf->file_rcs, rev, p1, 0);
+		fd1 = rcs_rev_write_stmp(cf->file_rcs, rev, p1, 0);
 	}
 
 	(void)xasprintf(&p2, "%s/diff2.XXXXXXXXXX", cvs_tmpdir);
-	rcs_rev_write_stmp(cf->file_rcs, rev, p2, RCS_KWEXP_NONE);
+	fd2 = rcs_rev_write_stmp(cf->file_rcs, rev, p2, RCS_KWEXP_NONE);
 
-	if ((b = cvs_buf_alloc(128, BUF_AUTOEXT)) == NULL)
-		fatal("commit_diff: failed to create diff buf");
+	b = cvs_buf_alloc(128);
 
 	diff_format = D_RCSDIFF;
 
@@ -571,10 +589,17 @@ commit_diff(struct cvs_file *cf, RCSNUM *rev, int reverse)
 		p = p1;
 		p1 = p2;
 		p2 = p;
+
+		f = fd1;
+		fd1 = fd2;
+		fd2 = f;
 	}
 
-	if (cvs_diffreg(p1, p2, b) == D_ERROR)
+	if (cvs_diffreg(p1, p2, fd1, fd2, b) == D_ERROR)
 		fatal("commit_diff: failed to get RCS patch");
+
+	close(fd1);
+	close(fd2);
 
 	xfree(p1);
 	xfree(p2);
@@ -595,7 +620,7 @@ commit_desc_set(struct cvs_file *cf)
 	if ((fd = open(desc_path, O_RDONLY)) == -1)
 		return;
 
-	bp = cvs_buf_load_fd(fd, BUF_AUTOEXT);
+	bp = cvs_buf_load_fd(fd);
 	cvs_buf_putc(bp, '\0');
 	desc = cvs_buf_release(bp);
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: remote.c,v 1.17 2007/09/17 10:07:21 tobias Exp $	*/
+/*	$OpenBSD: remote.c,v 1.22 2008/03/08 11:53:36 joris Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -155,7 +155,7 @@ cvs_remote_receive_file(int fd, size_t len)
 }
 
 void
-cvs_remote_send_file(const char *path)
+cvs_remote_send_file(const char *path, int _fd)
 {
 	int fd;
 	FILE *out, *in;
@@ -169,11 +169,17 @@ cvs_remote_send_file(const char *path)
 	else
 		out = current_cvsroot->cr_srvin;
 
-	if ((fd = open(path, O_RDONLY)) == -1)
-		fatal("cvs_remote_send_file: %s: %s", path, strerror(errno));
+	fd = dup(_fd);
+	if (fd == -1)
+		fatal("cvs_remote_send_file: dup: %s", strerror(errno));
+
+	if (lseek(fd, 0, SEEK_SET) < 0)
+		fatal("cvs_remote_send_file: %s: lseek: %s", path,
+		    strerror(errno));
 
 	if (fstat(fd, &st) == -1)
-		fatal("cvs_remote_send_file: %s: %s", path, strerror(errno));
+		fatal("cvs_remote_send_file: %s: fstat: %s", path,
+		    strerror(errno));
 
 	cvs_modetostr(st.st_mode, buf, sizeof(buf));
 	cvs_remote_output(buf);
@@ -245,3 +251,22 @@ cvs_remote_classify_file(struct cvs_file *cf)
 		cf->file_status = FILE_MODIFIED;
 }
 
+
+void
+cvs_validate_directory(const char *path)
+{
+	char *dir, *sp, *dp;
+
+	dir = xstrdup(path);
+
+	for (sp = dir; sp != NULL; sp = dp) {
+		dp = strchr(sp, '/');
+		if (dp != NULL)
+			*(dp++) = '\0';
+
+		if (!strcmp(sp, ".."))
+			fatal("path validation failed!");
+	}
+
+	xfree(dir);
+}

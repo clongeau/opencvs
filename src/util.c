@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.135 2008/02/09 20:04:00 xsa Exp $	*/
+/*	$OpenBSD: util.c,v 1.142 2008/03/09 01:58:00 joris Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * Copyright (c) 2005, 2006 Joris Vink <joris@openbsd.org>
@@ -27,9 +27,12 @@
  */
 
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <sys/wait.h>
 
+#include <atomicio.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
 #include <paths.h>
@@ -465,6 +468,7 @@ cvs_get_repository_path(const char *dir, char *dst, size_t len)
 
 	cvs_get_repository_name(dir, buf, sizeof(buf));
 	(void)xsnprintf(dst, len, "%s/%s", current_cvsroot->cr_dir, buf);
+	cvs_validate_directory(dst);
 }
 
 void
@@ -516,6 +520,7 @@ cvs_mkadmin(const char *path, const char *root, const char *repo,
     char *tag, char *date)
 {
 	FILE *fp;
+	int fd;
 	char buf[MAXPATHLEN];
 
 	if (cvs_server_active == 0)
@@ -528,13 +533,16 @@ cvs_mkadmin(const char *path, const char *root, const char *repo,
 	if (mkdir(buf, 0755) == -1 && errno != EEXIST)
 		fatal("cvs_mkadmin: %s: %s", buf, strerror(errno));
 
-	(void)xsnprintf(buf, sizeof(buf), "%s/%s", path, CVS_PATH_ROOTSPEC);
+	if (cvs_cmdop == CVS_OP_CHECKOUT || cvs_cmdop == CVS_OP_ADD) {
+		(void)xsnprintf(buf, sizeof(buf), "%s/%s",
+		    path, CVS_PATH_ROOTSPEC);
 
-	if ((fp = fopen(buf, "w")) == NULL)
-		fatal("cvs_mkadmin: %s: %s", buf, strerror(errno));
+		if ((fp = fopen(buf, "w")) == NULL)
+			fatal("cvs_mkadmin: %s: %s", buf, strerror(errno));
 
-	fprintf(fp, "%s\n", root);
-	(void)fclose(fp);
+		fprintf(fp, "%s\n", root);
+		(void)fclose(fp);
+	}
 
 	(void)xsnprintf(buf, sizeof(buf), "%s/%s", path, CVS_PATH_REPOSITORY);
 
@@ -545,6 +553,19 @@ cvs_mkadmin(const char *path, const char *root, const char *repo,
 	(void)fclose(fp);
 
 	cvs_write_tagfile(path, tag, date);
+
+	(void)xsnprintf(buf, sizeof(buf), "%s/%s", path, CVS_PATH_ENTRIES);
+
+	if ((fd = open(buf, O_WRONLY|O_CREAT|O_EXCL, 0666 & ~cvs_umask))
+	    == -1) {
+		if (errno == EEXIST)
+			return;
+		fatal("cvs_mkadmin: %s: %s", buf, strerror(errno));
+	}
+
+	if (atomicio(vwrite, fd, "D\n", 2) != 2)
+		fatal("cvs_mkadmin: %s", strerror(errno));
+	close(fd);
 }
 
 void
@@ -556,6 +577,10 @@ cvs_mkpath(const char *path, char *tag)
 	char *entry, sticky[CVS_REV_BUFSZ];
 	char *sp, *dp, *dir, *p, rpath[MAXPATHLEN], repo[MAXPATHLEN];
 
+	if (current_cvsroot->cr_method != CVS_METHOD_LOCAL ||
+	    cvs_server_active == 1)
+		cvs_validate_directory(path);
+
 	dir = xstrdup(path);
 
 	STRIP_SLASH(dir);
@@ -566,7 +591,7 @@ cvs_mkpath(const char *path, char *tag)
 	repo[0] = '\0';
 	rpath[0] = '\0';
 
-	if (cvs_cmdop == CVS_OP_UPDATE) {
+	if (cvs_cmdop == CVS_OP_UPDATE || cvs_cmdop == CVS_OP_COMMIT) {
 		if ((fp = fopen(CVS_PATH_REPOSITORY, "r")) != NULL) {
 			if ((fgets(repo, sizeof(repo), fp)) == NULL)
 				fatal("cvs_mkpath: bad repository file");
@@ -584,7 +609,7 @@ cvs_mkpath(const char *path, char *tag)
 			len = strlcpy(repo, module_repo_root, sizeof(repo));
 			if (len >= (int)sizeof(repo))
 				fatal("cvs_mkpath: overflow");
-		} else {
+		} else if (strcmp(sp, ".")) {
 			if (repo[0] != '\0') {
 				len = strlcat(repo, "/", sizeof(repo));
 				if (len >= (int)sizeof(repo))

@@ -1,3 +1,9 @@
+2008-03-10  chl  <chl@tuxfamily.org>
+
+	- update from the latest OpenCVS cvs repo (source and regress).
+	- fix build for NetBSD 4.0 (thanks to Igor Zinovik for the
+	report and patch).
+
 2008-02-10  chl  <chl@tuxfamily.org>
 
 	- update from the latest OpenCVS cvs repo (source and regress).

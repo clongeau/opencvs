@@ -1,4 +1,4 @@
-/*	$OpenBSD: client.c,v 1.102 2008/02/09 20:04:00 xsa Exp $	*/
+/*	$OpenBSD: client.c,v 1.111 2008/03/09 03:32:01 joris Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -133,7 +133,7 @@ client_get_supported_responses(void)
 	int i, first;
 
 	first = 0;
-	bp = cvs_buf_alloc(512, BUF_AUTOEXT);
+	bp = cvs_buf_alloc(512);
 	for (i = 0; cvs_responses[i].supported != -1; i++) {
 		if (cvs_responses[i].hdlr == NULL)
 			continue;
@@ -208,7 +208,6 @@ cvs_client_connect_to_server(void)
 	case CVS_METHOD_KSERVER:
 	case CVS_METHOD_GSERVER:
 	case CVS_METHOD_FORK:
-	case CVS_METHOD_EXT:
 		fatal("the specified connection method is not supported");
 	default:
 		break;
@@ -454,6 +453,7 @@ void
 cvs_client_sendfile(struct cvs_file *cf)
 {
 	size_t len;
+	struct tm *datetm;
 	char rev[CVS_REV_BUFSZ], timebuf[CVS_TIME_BUFSZ], sticky[CVS_REV_BUFSZ];
 
 	if (cf->file_type != CVS_FILE)
@@ -499,6 +499,10 @@ cvs_client_sendfile(struct cvs_file *cf)
 		if (cf->file_ent->ce_tag != NULL) {
 			(void)xsnprintf(sticky, sizeof(sticky), "T%s",
 			    cf->file_ent->ce_tag);
+		} else if (cf->file_ent->ce_date != -1) {
+			datetm = gmtime(&(cf->file_ent->ce_date));
+			(void)strftime(sticky, sizeof(sticky),
+			    "D"CVS_DATE_FMT, datetm);
 		}
 
 		cvs_client_send_request("Entry /%s/%s%s/%s/%s/%s",
@@ -519,7 +523,7 @@ cvs_client_sendfile(struct cvs_file *cf)
 	case FILE_ADDED:
 	case FILE_MODIFIED:
 		cvs_client_send_request("Modified %s", cf->file_name);
-		cvs_remote_send_file(cf->file_path);
+		cvs_remote_send_file(cf->file_path, cf->fd);
 		break;
 	case FILE_UPTODATE:
 		cvs_client_send_request("Unchanged %s", cf->file_name);
@@ -606,6 +610,7 @@ cvs_client_checkedin(char *data)
 	CVSENTRIES *entlist;
 	struct cvs_ent *ent, *newent;
 	size_t len;
+	struct tm *datetm;
 	char *dir, *e, *entry, rev[CVS_REV_BUFSZ];
 	char sticky[CVS_ENT_MAXLINELEN], timebuf[CVS_TIME_BUFSZ];
 
@@ -640,9 +645,14 @@ cvs_client_checkedin(char *data)
 		ctime_r(&ent->ce_mtime, timebuf);
 		timebuf[strcspn(timebuf, "\n")] = '\0';
 
-		if (newent->ce_tag != NULL)
+		if (newent->ce_tag != NULL) {
 			(void)xsnprintf(sticky, sizeof(sticky), "T%s",
 			    newent->ce_tag);
+		} else if (newent->ce_date != -1) {
+			datetm = gmtime(&(newent->ce_date));
+			(void)strftime(sticky, sizeof(sticky),
+			    "D"CVS_DATE_FMT, datetm);
+		}
 
 		cvs_ent_free(ent);
 	}
@@ -665,11 +675,12 @@ cvs_client_updated(char *data)
 {
 	int fd;
 	time_t now;
-	mode_t fmode, mask;
+	mode_t fmode;
 	size_t flen;
 	CVSENTRIES *ent;
 	struct cvs_ent *e;
 	const char *errstr;
+	struct tm *datetm;
 	struct timeval tv[2];
 	char repo[MAXPATHLEN], *entry;
 	char timebuf[CVS_TIME_BUFSZ], revbuf[CVS_REV_BUFSZ];
@@ -702,9 +713,7 @@ cvs_client_updated(char *data)
 
 	cvs_strtomode(mode, &fmode);
 	xfree(mode);
-	mask = umask(0);
-	umask(mask);
-	fmode &= ~mask;
+	fmode &= ~cvs_umask;
 
 	time(&now);
 	asctime_r(gmtime(&now), timebuf);
@@ -714,8 +723,13 @@ cvs_client_updated(char *data)
 	xfree(en);
 
 	sticky[0] = '\0';
-	if (e->ce_tag != NULL)
+	if (e->ce_tag != NULL) {
 		(void)xsnprintf(sticky, sizeof(sticky), "T%s", e->ce_tag);
+	} else if (e->ce_date != -1) {
+		datetm = gmtime(&(e->ce_date));
+		(void)strftime(sticky, sizeof(sticky),
+		    "D"CVS_DATE_FMT, datetm);
+	}
 
 	rcsnum_tostr(e->ce_rev, revbuf, sizeof(revbuf));
 
@@ -734,6 +748,7 @@ cvs_client_updated(char *data)
 
 	xfree(entry);
 
+	(void)unlink(fpath);
 	if ((fd = open(fpath, O_CREAT | O_WRONLY | O_TRUNC)) == -1)
 		fatal("cvs_client_updated: open: %s: %s",
 		    fpath, strerror(errno));
@@ -764,7 +779,7 @@ cvs_client_merged(char *data)
 {
 	int fd;
 	time_t now;
-	mode_t fmode, mask;
+	mode_t fmode;
 	size_t flen;
 	CVSENTRIES *ent;
 	const char *errstr;
@@ -802,9 +817,7 @@ cvs_client_merged(char *data)
 
 	cvs_strtomode(mode, &fmode);
 	xfree(mode);
-	mask = umask(0);
-	umask(mask);
-	fmode &= ~mask;
+	fmode &= ~cvs_umask;
 
 	time(&now);
 	asctime_r(gmtime(&now), timebuf);
@@ -815,6 +828,7 @@ cvs_client_merged(char *data)
 	cvs_ent_close(ent, ENT_SYNC);
 	xfree(entry);
 
+	(void)unlink(fpath);
 	if ((fd = open(fpath, O_CREAT | O_WRONLY | O_TRUNC)) == -1)
 		fatal("cvs_client_merged: open: %s: %s",
 		    fpath, strerror(errno));

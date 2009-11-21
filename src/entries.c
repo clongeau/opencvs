@@ -1,4 +1,4 @@
-/*	$OpenBSD: entries.c,v 1.92 2008/02/10 10:21:42 joris Exp $	*/
+/*	$OpenBSD: entries.c,v 1.95 2008/03/01 21:29:36 deraadt Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -188,7 +188,7 @@ cvs_ent_parse(const char *entry)
 		ent->ce_opts = NULL;
 
 	if (strcmp(fields[5], "")) {
-		switch(*fields[5]) {
+		switch (*fields[5]) {
 		case 'D':
 			if (sscanf(fields[5] + 1, "%d.%d.%d.%d.%d.%d",
 			    &dt.tm_year, &dt.tm_mon, &dt.tm_mday,
@@ -509,8 +509,8 @@ cvs_write_tagfile(const char *dir, char *tag, char *date)
 			}
 		} else {
 			datetm = gmtime(&cvs_specified_date);
-			strftime(sticky, sizeof(sticky), "D%Y.%m.%d.%H.%M.%S",
-			    datetm);
+			(void)strftime(sticky, sizeof(sticky),
+			    "D"CVS_DATE_FMT, datetm);
 		}
 
 		if (cvs_server_active == 1)
@@ -518,7 +518,5 @@ cvs_write_tagfile(const char *dir, char *tag, char *date)
 
 		(void)fprintf(fp, "%s\n", sticky);
 		(void)fclose(fp);
-	} else {
-		(void)cvs_unlink(tagpath);
 	}
 }

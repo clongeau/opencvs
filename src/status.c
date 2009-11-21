@@ -1,7 +1,7 @@
-/*	$OpenBSD: status.c,v 1.80 2008/01/31 10:15:05 tobias Exp $	*/
+/*	$OpenBSD: status.c,v 1.83 2008/02/13 17:05:13 joris Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
- * Copyright (c) 2005, 2006 Xavier Santolaria <xsa@openbsd.org>
+ * Copyright (c) 2005-2008 Xavier Santolaria <xsa@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -133,9 +133,13 @@ cvs_status_local(struct cvs_file *cf)
 		return;
 	}
 
-	head = rcs_head_get(cf->file_rcs);
-	if (head == NULL && cf->file_status != FILE_REMOVE_ENTRY)
-		return;
+	if (cf->file_rcs != NULL) {
+		head = rcs_head_get(cf->file_rcs);
+		if (head == NULL && cf->file_status != FILE_REMOVE_ENTRY)
+			return;
+	} else {
+		head = NULL;
+	}
 
 	cvs_printf("%s\n", CVS_STATUS_SEP);
 
@@ -145,7 +149,6 @@ cvs_status_local(struct cvs_file *cf)
 		status = "File had conflicts on merge";
 
 	if (cf->file_status == FILE_LOST ||
-	    cf->file_status == FILE_UNKNOWN ||
 	    cf->file_status == FILE_REMOVE_ENTRY ||
 	    (cf->file_rcs != NULL && cf->in_attic == 1 && cf->fd == -1)) {
 		(void)xsnprintf(buf, sizeof(buf), "no file %s\t",
@@ -207,6 +210,18 @@ cvs_status_local(struct cvs_file *cf)
 			    cf->file_ent->ce_tag);
 		else if (verbosity > 0)
 			cvs_printf("   Sticky Tag:\t\t(none)\n");
+
+		if (cf->file_ent->ce_date != -1) {
+			struct tm *datetm;
+			char datetmp[CVS_TIME_BUFSZ];
+
+			datetm = gmtime(&(cf->file_ent->ce_date));
+                        (void)strftime(datetmp, sizeof(datetmp),
+			    CVS_DATE_FMT, datetm);
+
+			cvs_printf("   Sticky Date:\t\t%s\n", datetmp);
+		} else if (verbosity > 0)
+			cvs_printf("   Sticky Date:\t\t(none)\n");
 
 		if (cf->file_ent->ce_opts != NULL)
 			cvs_printf("   Sticky Options:\t%s\n",

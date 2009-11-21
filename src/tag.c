@@ -1,4 +1,4 @@
-/*	$OpenBSD: tag.c,v 1.67 2008/02/09 13:03:29 joris Exp $	*/
+/*	$OpenBSD: tag.c,v 1.71 2008/03/09 03:14:52 joris Exp $	*/
 /*
  * Copyright (c) 2006 Xavier Santolaria <xsa@openbsd.org>
  *
@@ -39,7 +39,7 @@ static char	*tag_name = NULL;
 static char	*tag_oldname = NULL;
 
 struct cvs_cmd cvs_cmd_rtag = {
-	CVS_OP_RTAG, 0, "rtag",
+	CVS_OP_RTAG, CVS_LOCK_REPO, "rtag",
 	{ "rt", "rfreeze" },
 	"Add a symbolic tag to a module",
 	"[-bcdFflR] [-D date | -r rev] tag modules ...",
@@ -49,7 +49,7 @@ struct cvs_cmd cvs_cmd_rtag = {
 };
 
 struct cvs_cmd cvs_cmd_tag = {
-	CVS_OP_TAG, CVS_USE_WDIR, "tag",
+	CVS_OP_TAG, CVS_USE_WDIR | CVS_LOCK_REPO, "tag",
 	{ "ta", "freeze" },
 	"Add a symbolic tag to checked out version of files",
 	"[-bcdFflR] [-D date | -r rev] tag [file ...]",
@@ -95,7 +95,9 @@ cvs_tag(int argc, char **argv)
 			tag_oldname = optarg;
 			break;
 		default:
-			fatal("%s", cvs_cmd_tag.cmd_synopsis);
+			fatal("%s", cvs_cmdop == CVS_OP_TAG ?
+			    cvs_cmd_tag.cmd_synopsis :
+			    cvs_cmd_rtag.cmd_synopsis);
 		}
 	}
 
@@ -234,7 +236,7 @@ cvs_tag_local(struct cvs_file *cf)
 		return;
 	}
 
-	switch(cf->file_status) {
+	switch (cf->file_status) {
 	case FILE_ADDED:
 		if (verbosity > 1) {
 			cvs_log(LP_NOTICE,
@@ -281,6 +283,7 @@ tag_del(struct cvs_file *cf)
 static int
 tag_add(struct cvs_file *cf)
 {
+	int ret;
 	char revbuf[CVS_REV_BUFSZ], trevbuf[CVS_REV_BUFSZ];
 	RCSNUM *srev, *trev;
 	struct rcs_sym *sym;
@@ -349,8 +352,8 @@ tag_add(struct cvs_file *cf)
 		rcsnum_cpy(srev, trev, 0);
 	}
 
-	if (rcs_sym_add(cf->file_rcs, tag_name, trev) == -1) {
-		if (rcs_errno != RCS_ERR_DUPENT) {
+	if ((ret = rcs_sym_add(cf->file_rcs, tag_name, trev)) != 0) {
+		if (ret != 1) {
 			cvs_log(LP_NOTICE,
 			    "failed to set tag %s to revision %s in %s",
 			    tag_name, revbuf, cf->file_rcs->rf_path);

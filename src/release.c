@@ -1,4 +1,4 @@
-/*	$OpenBSD: release.c,v 1.38 2008/01/31 10:15:05 tobias Exp $	*/
+/*	$OpenBSD: release.c,v 1.40 2008/02/24 11:06:13 xsa Exp $	*/
 /*-
  * Copyright (c) 2005-2007 Xavier Santolaria <xsa@openbsd.org>
  *
@@ -123,11 +123,16 @@ cvs_release_local(struct cvs_file *cf)
 		cvs_chdir(cf->file_path, 0);
 
 		if (stat(CVS_PATH_CVSDIR, &st) == -1 || !S_ISDIR(st.st_mode)) {
-			cvs_log(LP_ERR, "no repository directory: %s",
-			    cf->file_path);
+			if (verbosity > 0)
+				cvs_log(LP_ERR, "no repository directory: %s",
+				    cf->file_path);
 			return;
 		}
 	}
+
+	/* Skip the interactive part if -Q is specified. */
+	if (verbosity == 0)
+		goto delete;
 
 	saved_noexec = cvs_noexec;
 	cvs_noexec = 1;
@@ -166,6 +171,7 @@ cvs_release_local(struct cvs_file *cf)
 	/* change back to original working dir */
 	cvs_chdir(wdir, 0);
 
+delete:
 	if (dflag == 1) {
 		if (cvs_rmdir(cf->file_path) != 0)
 			fatal("cvs_release_local: cvs_rmdir failed");

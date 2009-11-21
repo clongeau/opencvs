@@ -1,4 +1,4 @@
-/*	$OpenBSD: modules.c,v 1.10 2008/02/06 22:43:22 joris Exp $	*/
+/*	$OpenBSD: modules.c,v 1.13 2008/03/08 21:58:34 tobias Exp $	*/
 /*
  * Copyright (c) 2008 Joris Vink <joris@openbsd.org>
  *
@@ -48,7 +48,7 @@ cvs_modules_list(void)
 		printf("%s\n", mi->mi_str);
 }
 
-void
+int
 modules_parse_line(char *line, int lineno)
 {
 	int flags;
@@ -56,6 +56,7 @@ modules_parse_line(char *line, int lineno)
 	char *bline, *val, *p, *module, *sp, *dp;
 	char *dirname, fpath[MAXPATHLEN], *prog;
 
+	prog = NULL;
 	bline = xstrdup(line);
 
 	flags = 0;
@@ -79,7 +80,6 @@ modules_parse_line(char *line, int lineno)
 	while (!isspace(*p) && *p != '\0')
 		p++;
 
-	prog = NULL;
 	while (val[0] == '-') {
 		p = val;
 		while (!isspace(*p) && *p != '\0')
@@ -94,14 +94,14 @@ modules_parse_line(char *line, int lineno)
 		case 'a':
 			if (flags & MODULE_TARGETDIR) {
 				cvs_log(LP_NOTICE, "cannot use -a with -d");
-				return;
+				goto bad;
 			}
 			flags |= MODULE_ALIAS;
 			break;
 		case 'd':
 			if (flags & MODULE_ALIAS) {
 				cvs_log(LP_NOTICE, "cannot use -d with -a");
-				return;
+				goto bad;
 			}
 			flags |= MODULE_TARGETDIR;
 			break;
@@ -112,7 +112,7 @@ modules_parse_line(char *line, int lineno)
 			if (flags != 0 || prog != NULL) {
 				cvs_log(LP_NOTICE,
 				    "-o cannot be used with other flags");
-				return;
+				goto bad;
 			}
 
 			val = p;
@@ -130,7 +130,7 @@ modules_parse_line(char *line, int lineno)
 			if (flags != 0 || prog != NULL) {
 				cvs_log(LP_NOTICE,
 				    "-i cannot be used with other flags");
-				return;
+				goto bad;
 			}
 
 			if ((val = strchr(p, ' ' )) == NULL)
@@ -198,10 +198,14 @@ modules_parse_line(char *line, int lineno)
 		cvs_file_get(dirname, 0, &(mi->mi_modules));
 
 	TAILQ_INSERT_TAIL(&modules, mi, m_list);
-	return;
+	return (0);
 
 bad:
+	if (prog != NULL)
+		xfree(prog);
+	xfree(bline);
 	cvs_log(LP_NOTICE, "malformed line in CVSROOT/modules: %d", lineno);
+	return (0);
 }
 
 struct module_checkout *
@@ -214,7 +218,6 @@ cvs_module_lookup(char *name)
 
 	TAILQ_FOREACH(mi, &modules, m_list) {
 		if (!strcmp(name, mi->mi_name)) {
-			mc = xmalloc(sizeof(*mc));
 			mc->mc_modules = mi->mi_modules;
 			mc->mc_ignores = mi->mi_ignores;
 			mc->mc_canfree = 0;
@@ -230,7 +233,7 @@ cvs_module_lookup(char *name)
 	cvs_file_get(name, 0, &(mc->mc_modules));
 	mc->mc_canfree = 1;
 	mc->mc_name = name;
-	mc->mc_flags |= MODULE_ALIAS;
+	mc->mc_flags = MODULE_ALIAS;
 	mc->mc_prog = NULL;
 
 	return (mc);

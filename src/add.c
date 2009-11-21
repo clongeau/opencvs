@@ -1,4 +1,4 @@
-/*	$OpenBSD: add.c,v 1.94 2008/02/09 20:04:00 xsa Exp $	*/
+/*	$OpenBSD: add.c,v 1.97 2008/03/09 03:41:55 joris Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  * Copyright (c) 2005, 2006 Xavier Santolaria <xsa@openbsd.org>
@@ -27,7 +27,6 @@
 
 extern char *__progname;
 
-void	cvs_add_local(struct cvs_file *);
 void	cvs_add_entry(struct cvs_file *);
 void	cvs_add_remote(struct cvs_file *);
 
@@ -90,6 +89,7 @@ cvs_add(int argc, char **argv)
 	if (current_cvsroot->cr_method != CVS_METHOD_LOCAL) {
 		cvs_client_connect_to_server();
 		cr.fileproc = cvs_add_remote;
+		flags = 0;
 
 		if (kflag)
 			cvs_client_send_request("Argument %s", kbuf);
@@ -145,7 +145,8 @@ cvs_add_local(struct cvs_file *cf)
 {
 	cvs_log(LP_TRACE, "cvs_add_local(%s)", cf->file_path);
 
-	cvs_file_classify(cf, cvs_directory_tag);
+	if (cvs_cmdop != CVS_OP_CHECKOUT && cvs_cmdop != CVS_OP_UPDATE)
+		cvs_file_classify(cf, cvs_directory_tag);
 
 	/* dont use `cvs add *' */
 	if (strcmp(cf->file_name, ".") == 0 ||
@@ -431,7 +432,6 @@ add_entry(struct cvs_file *cf)
 			(void)xsnprintf(tbuf, sizeof(tbuf), "Initial %s",
 			    cf->file_name);
 
-		
 		cvs_ent_line_str(cf->file_name, "0", tbuf, kflag ? kbuf : "",
 		    sticky, 0, 0, entry, CVS_ENT_MAXLINELEN);
 	}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cvs.h,v 1.159 2008/02/10 10:10:15 joris Exp $	*/
+/*	$OpenBSD: cvs.h,v 1.164 2008/03/09 03:14:52 joris Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -54,6 +54,8 @@
 #define CVS_REV_BUFSZ	32
 #define CVS_TIME_BUFSZ	64
 
+#define CVS_DATE_FMT	"%Y.%m.%d.%H.%M.%S"
+
 /* operations */
 #define CVS_OP_UNKNOWN		0
 #define CVS_OP_ADD		1
@@ -102,7 +104,8 @@
 #define CVS_CMD_MAXARG		128
 
 /* flags */
-#define CVS_USE_WDIR		1
+#define CVS_USE_WDIR		0x01
+#define CVS_LOCK_REPO		0x02
 
 /* defaults */
 #define CVS_SERVER_DEFAULT	"cvs"
@@ -269,7 +272,7 @@ struct cvs_ent {
 	char		*ce_name;
 	char		*ce_opts;
 	char		*ce_tag;
-	time_t		*ce_date;
+	time_t		 ce_date;
 	time_t		 ce_mtime;
 	u_int16_t	 ce_type;
 	u_int16_t	 ce_status;
@@ -290,6 +293,8 @@ typedef struct cvs_entries {
 } CVSENTRIES;
 
 extern char *checkout_target_dir;
+extern char *cvs_join_rev1;
+extern char *cvs_join_rev2;
 
 extern struct module_checkout *current_module;
 extern char *module_repo_root;
@@ -374,9 +379,9 @@ time_t		 cvs_date_parse(const char *);
 struct cvs_ent	*cvs_ent_parse(const char *);
 struct cvs_ent	*cvs_ent_get(CVSENTRIES *, const char *);
 CVSENTRIES	*cvs_ent_open(const char *);
-void	 	cvs_ent_add(CVSENTRIES *, const char *);
-void	 	cvs_ent_remove(CVSENTRIES *, const char *);
-void	 	cvs_ent_close(CVSENTRIES *, int);
+void		cvs_ent_add(CVSENTRIES *, const char *);
+void		cvs_ent_remove(CVSENTRIES *, const char *);
+void		cvs_ent_close(CVSENTRIES *, int);
 void		cvs_ent_free(struct cvs_ent *);
 void		cvs_ent_line_str(const char *, char *, char *, char *, char *,
 		    int, int, char *, size_t);
@@ -396,6 +401,8 @@ void	cvs_update_local(struct cvs_file *);
 void	cvs_update_enterdir(struct cvs_file *);
 void	cvs_update_leavedir(struct cvs_file *);
 void	cvs_checkout_file(struct cvs_file *, RCSNUM *, char *, int);
+void	cvs_remove_local(struct cvs_file *);
+void	cvs_add_local(struct cvs_file *);
 int	update_has_conflict_markers(struct cvs_file *);
 
 #define CO_MERGE	0x01

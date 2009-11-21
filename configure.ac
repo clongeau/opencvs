@@ -187,6 +187,24 @@ int main(int argc, char **argv) {
 	])
 ])
 
+#this optreset check comes from portable openssh by Damien Miller
+AC_CACHE_CHECK([whether getopt has optreset support],
+		ac_cv_have_getopt_optreset, [
+	AC_TRY_LINK(
+		[
+#include <getopt.h>
+		],
+		[ extern int optreset; optreset = 0; ],
+		[ ac_cv_have_getopt_optreset="yes" ],
+		[ ac_cv_have_getopt_optreset="no" ]
+	)
+])
+if test "x$ac_cv_have_getopt_optreset" = "xyes" ; then
+	AC_DEFINE(HAVE_GETOPT_OPTRESET, 1,
+		[Define if your getopt(3) defines and uses optreset])
+fi
+
+
 AC_DEFINE([_GNU_SOURCE], [], [Enable GNU Extensions])
 
 CFLAGS="$CFLAGS -Wall"

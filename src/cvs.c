@@ -38,7 +38,7 @@
 #include "cvs.h"
 #include "remote.h"
 
-#ifndef HAVE_DECL_OPTRESET
+#ifndef HAVE_GETOPT_OPTRESET
 static int optreset;
 #endif
 

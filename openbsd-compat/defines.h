@@ -261,11 +261,6 @@ typedef int ssize_t;
 # define HAVE_SSIZE_T
 #endif /* HAVE_SSIZE_T */
 
-#ifndef HAVE_CLOCK_T
-typedef long clock_t;
-# define HAVE_CLOCK_T
-#endif /* HAVE_CLOCK_T */
-
 #ifndef HAVE_SA_FAMILY_T
 typedef int sa_family_t;
 # define HAVE_SA_FAMILY_T
@@ -289,13 +284,6 @@ typedef int mode_t;
 #if !defined(HAVE_SS_FAMILY_IN_SS) && defined(HAVE___SS_FAMILY_IN_SS)
 # define ss_family __ss_family
 #endif /* !defined(HAVE_SS_FAMILY_IN_SS) && defined(HAVE_SA_FAMILY_IN_SS) */
-
-#ifndef HAVE_SYS_UN_H
-struct	sockaddr_un {
-	short	sun_family;		/* AF_UNIX */
-	char	sun_path[108];		/* path name (gag) */
-};
-#endif /* HAVE_SYS_UN_H */
 
 #ifndef HAVE_IN_ADDR_T
 typedef u_int32_t	in_addr_t;

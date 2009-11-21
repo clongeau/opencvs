@@ -1,3 +1,16 @@
+2008-06-24  chl  <chl@tuxfamily.org>
+
+	- fix some newly introduced issue du to my last update:
+	  * remove clock_t structure definition in defines.h (reported by
+	    Igor Zinovik).
+	  * remove pid_t and sockaddr_un structure definition in defines.h
+	    (reported by Mike Belopuhov).
+	- deal with missing tm_gmtoff field in struct tm on Solaris
+	  (reported by Mike Belopuhov).
+	- handle u_intXX_t types properly (reported by Mike Belopuhov and
+	Elias Pipping).
+	- update from the latest OpenCVS cvs repo (source only).
+
 2008-06-21  chl  <chl@tuxfamily.org>
 
 	- update bootstrap script by following Andrey Oktyabrsky advises

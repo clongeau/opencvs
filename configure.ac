@@ -1,4 +1,4 @@
-AC_INIT([OpenCVS],[4.2.0],[Charles Longeau <chl@openbsd.org>])
+AC_INIT([OpenCVS],[4.4.0],[Charles Longeau <chl@openbsd.org>])
 AM_INIT_AUTOMAKE
 
 # Checks for programs.
@@ -8,17 +8,29 @@ AC_PROG_INSTALL
 AC_PROG_LIBTOOL
 AC_PROG_LN_S
 
-
 # special check for Solaris
 # stolen from vlc's configure.ac
 case "${host_os}" in
   solaris*)
-    SYS=solaris
     # _POSIX_PTHREAD_SEMANTICS is needed to get the POSIX ctime_r
     # Perhaps it is useful other places as well? 
     CFLAGS_save="${CFLAGS_save} -D_POSIX_PTHREAD_SEMANTICS"; CFLAGS="${CFLAGS_save}"
     ;;
 esac
+
+# taken from portable openssh configure.ac
+AC_ARG_WITH(Werror,
+	[  --with-Werror           Build main code with -Werror],
+	[
+		if test -n "$withval"  &&  test "x$withval" != "xno"; then
+			werror_flags="-Werror"
+			if test "x${withval}" != "xyes"; then
+				werror_flags="$withval"
+			fi
+		fi
+	]
+)
+
 
 AC_CHECK_HEADERS([sys/dirent.h dirent.h sys/time.h utimes.h])
 AC_CHECK_FUNCS([ \
@@ -29,13 +41,15 @@ AC_CHECK_FUNCS([ \
 		strlcat \
 		strlcpy \
 		strtonum \
+		tzset \
 		])
 
-#comes from sudo's configure.in
+# comes from sudo's configure.in
 AC_CHECK_FUNCS(utimes, [AC_CHECK_FUNCS(futimes futimesat, [break])], [AC_CHECK_FUNCS(futime) AC_LIBOBJ(utimes)])
 
 
-#from here everything comes from portable openssh configure.ac script
+# taken from portable openssh configure.ac
+
 AC_CHECK_DECL(LLONG_MAX, have_llong_max=1, , [#include <limits.h>])
 
 if test "$GCC" = "yes" || test "$GCC" = "egcs"; then
@@ -70,6 +84,17 @@ if test "x$no_attrib_nonnull" != "x1" ; then
 	AC_DEFINE(HAVE_ATTRIBUTE__NONNULL__, 1, [Have attribute nonnull])
 fi
 
+# Check datatype sizes
+AC_CHECK_SIZEOF(char, 1)
+AC_CHECK_SIZEOF(short int, 2)
+AC_CHECK_SIZEOF(int, 4)
+AC_CHECK_SIZEOF(long int, 4)
+AC_CHECK_SIZEOF(long long int, 8)
+
+# Sanity check long long for some platforms (AIX)
+if test "x$ac_cv_sizeof_long_long_int" = "x4" ; then
+	ac_cv_sizeof_long_long_int=0
+fi
 
 # compute LLONG_MIN and LLONG_MAX if we don't know them.
 if test -z "$have_llong_max"; then
@@ -350,6 +375,7 @@ AC_CACHE_CHECK([for u_char], ac_cv_have_u_char, [
 if test "x$ac_cv_have_u_char" = "xyes" ; then
 	AC_DEFINE(HAVE_U_CHAR, 1, [define if you have u_char data type])
 fi
+
 dnl IRIX and Solaris 2.5.1 have dirname() in libgen
 AC_CHECK_FUNCS(dirname, [AC_CHECK_HEADERS(libgen.h)] ,[
 	AC_CHECK_LIB(gen, dirname,[
@@ -443,6 +469,19 @@ if test "x$ac_cv_have_sa_family_t" = "xyes" ; then
 		[define if you have sa_family_t data type])
 fi
 
+AC_CACHE_CHECK([for pid_t], ac_cv_have_pid_t, [
+	AC_TRY_COMPILE(
+		[
+#include <sys/types.h>
+		],
+		[ pid_t foo; foo = 1235; ],
+		[ ac_cv_have_pid_t="yes" ],
+		[ ac_cv_have_pid_t="no" ]
+	)
+])
+if test "x$ac_cv_have_pid_t" = "xyes" ; then
+	AC_DEFINE(HAVE_PID_T, 1, [define if you have pid_t data type])
+fi
 
 AC_CACHE_CHECK([for mode_t], ac_cv_have_mode_t, [
 	AC_TRY_COMPILE(
@@ -457,7 +496,6 @@ AC_CACHE_CHECK([for mode_t], ac_cv_have_mode_t, [
 if test "x$ac_cv_have_mode_t" = "xyes" ; then
 	AC_DEFINE(HAVE_MODE_T, 1, [define if you have mode_t data type])
 fi
-
 
 
 AC_SEARCH_LIBS(basename, gen, AC_DEFINE(HAVE_BASENAME, 1,
@@ -479,19 +517,56 @@ if test "x$ac_cv_have_getopt_optreset" = "xyes" ; then
 		[Define if your getopt(3) defines and uses optreset])
 fi
 
-AC_DEFINE([_GNU_SOURCE], [], [Enable GNU Extensions])
+# end of portable openssh configure.ac inclusions
 
-AC_ARG_WITH(Werror,
-	[  --with-Werror           Build main code with -Werror],
-	[
-		if test -n "$withval"  &&  test "x$withval" != "xno"; then
-			werror_flags="-Werror"
-			if test "x${withval}" != "xyes"; then
-				werror_flags="$withval"
-			fi
-		fi
-	]
-)
+
+# taken from gnash configure.ac
+# (tm_gmtoff and timezone checks)
+AC_CACHE_CHECK([whether struct tm has tm_gmtoff], ac_cv_tm_gmtoff, [
+	AC_TRY_LINK([
+/* ctime(1) says "The glibc version of struct tm has additional fields
+ * defined  when _BSD_SOURCE was set before including <time.h>"
+ * In practice, you don't need to define it yourself (tested on glibc-2.2.1 
+ * and 2.3.6) but if you *do* define it yourself, it makes *all* functions
+ * favour BSD-like behaviour over of GNU/POSIX, which seems dangerous.
+ */
+// #define _BSD_SOURCE 1
+#include <time.h>
+], 
+		[ struct tm tm; long l = tm.tm_gmtoff; ], 
+		[ ac_cv_tm_gmtoff="yes" ],
+		[ ac_cv_tm_gmtoff="no" ]
+	)
+])
+
+if test "x$ac_cv_tm_gmtoff" = "xyes" ; then
+	AC_DEFINE(HAVE_TM_GMTOFF, [1], [struct tm has member tm_gmtoff])
+fi
+
+AC_CACHE_CHECK([whether timezone is a long], ac_cv_long_timezone, [
+	AC_TRY_LINK([
+/* On Linux/glibc, tzset(3) says "extern long timezone;" (seconds West of GMT)
+ * but on BSD char *timezone(int,int) is a function returning a string name.
+ * The BSD function timegm() may be the equivalent, but this should
+ * not be necessary because on BSD the code should use tm.tm_gmtoff instead
+ * (use of long timezone is a fallback strategy for when tm_gmtoff exists not).
+ */
+#include <stdio.h>
+#include <time.h>
+extern long timezone;
+  ],
+    [ printf("%ld", timezone); ], 
+    [ ac_cv_long_timezone="yes" ],
+    [ ac_cv_long_timezone="no" ]
+   )
+])
+
+if test "x$ac_cv_long_timezone" = "xyes" ; then
+	AC_DEFINE(HAVE_LONG_TIMEZONE, [1], [extern timezone is a long integer, not a function])
+fi
+
+
+AC_DEFINE([_GNU_SOURCE], [], [Enable GNU Extensions])
 
 dnl Adding -Werror to CFLAGS early prevents configure tests from running.
 dnl Add now.

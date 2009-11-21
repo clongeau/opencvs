@@ -225,7 +225,7 @@ cvs_remote_send_file_buf(char *file, BUF *bp, mode_t mode)
 	cvs_modetostr(mode, buf, sizeof(buf));
 	cvs_remote_output(buf);
 
-	(void)xsnprintf(buf, sizeof(buf), "%ld", len);
+	(void)xsnprintf(buf, sizeof(buf), "%zu", len);
 	cvs_remote_output(buf);
 
 	ret = fwrite(data, sizeof(char), len, stdout);

@@ -28,6 +28,8 @@
 #ifndef FILE_H
 #define FILE_H
 
+#include "../openbsd-compat/sys-queue.h"
+
 #include <dirent.h>
 #include <stdio.h>
 

@@ -21,7 +21,6 @@
 /release.c/1.40/Mon Mar 10 09:56:41 2008//THEAD
 /repository.c/1.20/Mon Mar 10 09:56:41 2008//THEAD
 /repository.h/1.4/Mon Mar 10 09:56:41 2008//THEAD
-/Makefile/1.46/Wed Jun 18 20:03:29 2008//
 /add.c/1.105/Wed Jun 18 20:03:29 2008//THEAD
 /annotate.c/1.60/Result of merge//THEAD
 /buf.c/1.72/Result of merge//THEAD
@@ -29,7 +28,6 @@
 /checkout.c/1.155/Result of merge//THEAD
 /client.c/1.116/Result of merge//THEAD
 /commit.c/1.143/Wed Jun 18 20:03:29 2008//THEAD
-/cvs.c/1.149/Result of merge//THEAD
 /cvs.h/1.170/Result of merge//THEAD
 /diff_internals.c/1.25/Result of merge+Wed Jun 18 20:03:31 2008//THEAD
 /edit.c/1.47/Wed Jun 18 20:03:31 2008//THEAD
@@ -53,7 +51,6 @@
 /status.c/1.88/Wed Jun 18 20:03:32 2008//THEAD
 /trigger.c/1.14/Tue Jun 17 17:15:56 2008//THEAD
 /trigger.h/1.2/Tue Jun 10 05:29:14 2008//THEAD
-/util.c/1.146/Result of merge//THEAD
 /util.h/1.26/Wed Jun 18 20:03:32 2008//THEAD
 /history.c/1.39/Thu Jun 19 20:46:00 2008//THEAD
 /update.c/1.155/Result of merge//THEAD
@@ -61,4 +58,10 @@
 /diff.c/1.144/Sat Jun 21 15:11:12 2008//THEAD
 /root.c/1.45/Sat Jun 21 15:11:13 2008//THEAD
 /tag.c/1.76/Sat Jun 21 15:11:13 2008//THEAD
+/Makefile/1.47/Result of merge+Sun Jun 22 16:41:29 2008//
+/cvs.c/1.150/Result of merge//THEAD
+/hash.c/1.1/Sat Jun 21 15:39:15 2008//THEAD
+/hash.h/1.1/Sat Jun 21 15:39:15 2008//THEAD
+/hash_func.c/1.1/Sat Jun 21 15:39:15 2008//THEAD
+/util.c/1.147/Result of merge//THEAD
 D

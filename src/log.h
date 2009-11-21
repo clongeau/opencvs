@@ -29,8 +29,6 @@
 
 #include <stdarg.h>
 
-#include "compat.h"
-
 /* log priority levels */
 #define LP_NOTICE	0
 #define LP_ERR		1

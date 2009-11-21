@@ -28,7 +28,7 @@ void cvs_parse_modules(void);
 int config_parse_line(char *, int);
 int modules_parse_line(char *, int);
 
-#include <sys/queue.h>
+#include "../openbsd-compat/sys-queue.h"
 #include "file.h"
 
 /* module stuff */

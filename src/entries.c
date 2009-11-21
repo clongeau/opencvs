@@ -27,6 +27,10 @@
 #define CVS_ENTRIES_NFIELDS	6
 #define CVS_ENTRIES_DELIM	'/'
 
+#if !defined(HAVE_TM_GMTOFF) && defined(HAVE_LONG_TIMEZONE)
+extern long timezone;
+#endif
+
 static struct cvs_ent_line *ent_get_line(CVSENTRIES *, const char *);
 
 CVSENTRIES *current_list = NULL;
@@ -185,9 +189,15 @@ cvs_ent_parse(const char *entry)
 			if (strptime(p, "%a %b %d %T %Y", &t) != NULL) {
 
 				t.tm_isdst = -1;	/* Figure out DST. */
+#ifdef HAVE_TM_GMTOFF
 				t.tm_gmtoff = 0;
 				ent->ce_mtime = mktime(&t);
 				ent->ce_mtime += t.tm_gmtoff;
+#elif defined(HAVE_TZSET) && defined(HAVE_LONG_TIMEZONE)
+				tzset();
+				ent->ce_mtime = mktime(&t);
+				ent->ce_mtime -= timezone;
+#endif
 			}
 		}
 	}

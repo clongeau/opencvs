@@ -1,5 +1,5 @@
 %{
-/*	$OpenBSD: date.y,v 1.16 2007/02/22 06:42:09 otto Exp $	*/
+/*	$OpenBSD: date.y,v 1.17 2007/10/06 12:55:48 chl Exp $	*/
 
 /*
 **  Originally written by Steven M. Bellovin <smb@research.att.com> while

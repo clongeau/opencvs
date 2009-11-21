@@ -1,7 +1,7 @@
-/*	$OpenBSD: annotate.c,v 1.39 2007/09/22 16:01:22 joris Exp $	*/
+/*	$OpenBSD: annotate.c,v 1.43 2007/10/09 12:59:53 tobias Exp $	*/
 /*
- * Copyright (c) 2006 Xavier Santolaria <xsa@openbsd.org>
  * Copyright (c) 2007 Tobias Stoeckmann <tobias@openbsd.org>
+ * Copyright (c) 2006 Xavier Santolaria <xsa@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -28,8 +28,9 @@
 
 void	cvs_annotate_local(struct cvs_file *);
 
+extern char	*cvs_specified_tag;
+
 static int	 force_head = 0;
-static char	*rev = NULL;
 
 struct cvs_cmd cvs_cmd_annotate = {
 	CVS_OP_ANNOTATE, 0, "annotate",
@@ -63,7 +64,7 @@ cvs_annotate(int argc, char **argv)
 		case 'R':
 			break;
 		case 'r':
-			rev = optarg;
+			cvs_specified_tag = optarg;
 			break;
 		default:
 			fatal("%s", cvs_cmd_annotate.cmd_synopsis);
@@ -86,8 +87,9 @@ cvs_annotate(int argc, char **argv)
 		if (!(flags & CR_RECURSE_DIRS))
 			cvs_client_send_request("Argument -l");
 
-		if (rev != NULL)
-			cvs_client_send_request("Argument -r%s", rev);
+		if (cvs_specified_tag != NULL)
+			cvs_client_send_request("Argument -r%s",
+			    cvs_specified_tag);
 	} else {
 		cr.fileproc = cvs_annotate_local;
 	}
@@ -114,7 +116,8 @@ cvs_annotate_local(struct cvs_file *cf)
 {
 	int i;
 	char date[10], rnum[13], *p;
-	RCSNUM *crev;
+	RCSNUM *bnum, *rev;
+	struct cvs_line *line;
 	struct cvs_line **alines;
 
 	cvs_log(LP_TRACE, "cvs_annotate_local(%s)", cf->file_path);
@@ -125,21 +128,44 @@ cvs_annotate_local(struct cvs_file *cf)
 	    cf->file_type != CVS_FILE)
 		return;
 
-	if (rev == NULL)
-		rcs_rev_getlines(cf->file_rcs, cf->file_rcsrev, &alines);
-	else {
-		crev = rcsnum_parse(rev);
-
-		if (rcsnum_cmp(crev, cf->file_rcsrev, 0) < 0) {
-			if (!force_head) {
+	if (cvs_specified_tag != NULL) {
+		if ((rev = rcs_translate_tag(cvs_specified_tag,
+		    cf->file_rcs)) == NULL) {
+			if (!force_head)
 				/* Stick at weird GNU cvs, ignore error. */
-				rcsnum_free(crev);
 				return;
-			}
-			rcsnum_cpy(cf->file_rcsrev, crev, 0);
+
+			rev = rcsnum_alloc();
+			rcsnum_cpy(cf->file_rcs->rf_head, rev, 0);
 		}
-		rcs_rev_getlines(cf->file_rcs, crev, &alines);
-		rcsnum_free(crev);
+
+		/*
+		 * If this is a revision in a branch, we have to go first
+		 * from HEAD to branch, then down to 1.1. After that, take
+		 * annotated branch and go up to branch revision. This must
+		 * be done this way due to different handling of "a" and
+		 * "d" in rcs file for annotation.
+		 */
+		if (!RCSNUM_ISBRANCHREV(rev)) {
+			bnum = rev;
+		} else {
+			bnum = rcsnum_alloc();
+			rcsnum_cpy(rev, bnum, 2);
+		}
+
+		rcs_rev_getlines(cf->file_rcs, bnum, &alines);
+
+		/*
+		 * Go into branch and receive annotations for branch revision,
+		 * with inverted "a" and "d" meaning.
+		 */
+		if (bnum != rev) {
+			rcs_annotate_getlines(cf->file_rcs, rev, &alines);
+			rcsnum_free(bnum);
+		}
+		rcsnum_free(rev);
+	} else {
+		rcs_rev_getlines(cf->file_rcs, cf->file_rcs->rf_head, &alines);
 	}
 
 	/* Stick at weird GNU cvs, ignore error. */
@@ -150,29 +176,30 @@ cvs_annotate_local(struct cvs_file *cf)
 	cvs_log(LP_RCS, "***************");
 
 	for (i = 0; alines[i] != NULL; i++) {
-		rcsnum_tostr(alines[i]->l_delta->rd_num, rnum, sizeof(rnum));
-		strftime(date, sizeof(date), "%d-%b-%y",
-		    &(alines[i]->l_delta->rd_date));
-		if (alines[i]->l_len &&
-		    alines[i]->l_line[alines[i]->l_len - 1] == '\n')
-			alines[i]->l_line[alines[i]->l_len - 1] = '\0';
-		else {
-			p = xmalloc(alines[i]->l_len + 1);
-			memcpy(p, alines[i]->l_line, alines[i]->l_len);
-			p[alines[i]->l_len] = '\0';
+		line = alines[i];
 
-			if (alines[i]->l_needsfree)
-				xfree(alines[i]->l_line);
-			alines[i]->l_line = p;
-			alines[i]->l_len++;
-			alines[i]->l_needsfree = 1;
+		rcsnum_tostr(line->l_delta->rd_num, rnum, sizeof(rnum));
+		strftime(date, sizeof(date), "%d-%b-%y",
+		    &(line->l_delta->rd_date));
+		if (line->l_len && line->l_line[line->l_len - 1] == '\n')
+			line->l_line[line->l_len - 1] = '\0';
+		else {
+			p = xmalloc(line->l_len + 1);
+			memcpy(p, line->l_line, line->l_len);
+			p[line->l_len] = '\0';
+
+			if (line->l_needsfree)
+				xfree(line->l_line);
+			line->l_line = p;
+			line->l_len++;
+			line->l_needsfree = 1;
 		}
 		cvs_printf("%-12.12s (%-8.8s %s): %s\n", rnum,
-		    alines[i]->l_delta->rd_author, date, alines[i]->l_line);
+		    line->l_delta->rd_author, date, line->l_line);
 
-		if (alines[i]->l_needsfree)
-			xfree(alines[i]->l_line);
-		xfree(alines[i]);
+		if (line->l_needsfree)
+			xfree(line->l_line);
+		xfree(line);
 	}
 
 	xfree(alines);

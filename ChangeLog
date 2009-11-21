@@ -1,3 +1,8 @@
+2007-10-12  chl  <chl@tuxfamily.org>
+
+	- update from the latest OpenCVS cvs repo (source and regress).
+	- improve regress tests Makefile
+
 2007-10-06  chl  <chl@tuxfamily.org>
 
 	- make it build when futimes and getdirentries are not available.

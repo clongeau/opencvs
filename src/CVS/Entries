@@ -8,8 +8,6 @@
 /compress.c/1.6/Tue Aug 21 12:44:30 2007//THEAD
 /compress.h/1.1/Tue Aug 21 12:44:30 2007//THEAD
 /cvs.1/1.114/Tue Aug 21 12:44:30 2007//THEAD
-/cvs.c/1.138/Wed Sep 19 20:49:47 2007//THEAD
-/date.y/1.16/Tue Aug 21 12:44:30 2007//THEAD
 /diff.h/1.14/Tue Aug 21 12:44:30 2007//THEAD
 /diff3.c/1.39/Wed Sep 19 20:49:47 2007//THEAD
 /fatal.c/1.13/Wed Sep 19 20:49:47 2007//THEAD
@@ -29,9 +27,7 @@
 /util.h/1.22/Fri Sep 21 13:45:15 2007//THEAD
 /add.c/1.82/Wed Sep 26 08:12:22 2007//THEAD
 /admin.c/1.52/Result of merge//THEAD
-/annotate.c/1.39/Result of merge//THEAD
 /checkout.c/1.105/Result of merge//THEAD
-/client.c/1.81/Result of merge//THEAD
 /cmd.c/1.63/Result of merge//THEAD
 /cvs.h/1.147/Result of merge//THEAD
 /diff.c/1.121/Wed Sep 26 08:12:23 2007//THEAD
@@ -40,8 +36,6 @@
 /getlog.c/1.78/Wed Sep 26 08:12:23 2007//THEAD
 /import.c/1.77/Wed Sep 26 08:12:23 2007//THEAD
 /log.c/1.41/Fri Sep 21 21:00:08 2007//THEAD
-/rcs.c/1.222/Wed Sep 26 08:12:23 2007//THEAD
-/rcs.h/1.79/Result of merge//THEAD
 /rcsnum.c/1.47/Wed Sep 26 08:12:23 2007//THEAD
 /release.c/1.36/Wed Sep 26 08:12:23 2007//THEAD
 /remote.h/1.26/Wed Sep 26 08:12:23 2007//THEAD
@@ -53,11 +47,17 @@
 /logmsg.c/1.45/Wed Sep 26 08:12:23 2007//THEAD
 /log.h/1.22/Tue Oct  2 20:29:52 2007//THEAD
 /update.c/1.112/Tue Oct  2 20:32:02 2007//THEAD
-/commit.c/1.114/Thu Oct  4 12:48:38 2007//THEAD
-/Makefile/1.41/Sat Oct  6 00:33:54 2007//
 /edit.c/1.39/Sat Oct  6 00:33:55 2007//THEAD
 /entries.c/1.84/Result of merge//THEAD
-/file.c/1.203/Result of merge//THEAD
 /root.c/1.44/Sat Oct  6 00:33:55 2007//THEAD
-/util.c/1.120/Result of merge//THEAD
+/Makefile/1.41/Fri Oct 12 15:36:29 2007//
+/annotate.c/1.43/Result of merge//THEAD
+/client.c/1.82/Result of merge//THEAD
+/commit.c/1.115/Fri Oct 12 15:36:29 2007//THEAD
+/cvs.c/1.139/Result of merge//THEAD
+/file.c/1.204/Result of merge//THEAD
+/rcs.c/1.225/Fri Oct 12 15:36:29 2007//THEAD
+/rcs.h/1.80/Result of merge//THEAD
+/util.c/1.121/Result of merge//THEAD
+/date.y/1.17/Fri Oct 12 15:36:29 2007//THEAD
 D

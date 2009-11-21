@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcs.c,v 1.225 2007/10/09 12:59:53 tobias Exp $	*/
+/*	$OpenBSD: rcs.c,v 1.231 2007/11/11 14:02:35 tobias Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -174,6 +174,7 @@ struct rcs_kw rcs_expkw[] =  {
 	{ "Date",	RCS_KW_DATE     },
 	{ "Header",	RCS_KW_HEADER   },
 	{ "Id",		RCS_KW_ID       },
+	{ "Locker",	RCS_KW_LOCKER	},
 	{ "Log",	RCS_KW_LOG      },
 	{ "Name",	RCS_KW_NAME     },
 	{ "RCSfile",	RCS_KW_RCSFILE  },
@@ -252,7 +253,7 @@ RCSFILE *
 rcs_open(const char *path, int fd, int flags, ...)
 {
 	int mode;
-	mode_t fmode;
+	mode_t fmode, mask;
 	RCSFILE *rfp;
 	va_list vap;
 	struct rcs_delta *rdp;
@@ -267,6 +268,10 @@ rcs_open(const char *path, int fd, int flags, ...)
 		va_end(vap);
 		fmode = (mode_t)mode;
 	}
+
+	mask = umask(0);
+	umask(mask);
+	fmode &= ~mask;
 
 	rfp = xcalloc(1, sizeof(*rfp));
 
@@ -553,7 +558,15 @@ rcs_head_get(RCSFILE *file)
 				break;
 		}
 		rcsnum_free(rootrev);
-		rcsnum_cpy(brp->rb_num, rev, 0);
+
+		if ((rdp = rcs_findrev(file, brp->rb_num)) == NULL)
+			fatal("rcs_head_get: could not find branch revision");
+		while (rdp->rd_next->rn_len != 0)
+			if ((rdp = rcs_findrev(file, rdp->rd_next)) == NULL)
+				fatal("rcs_head_get: could not find "
+				    "next branch revision");
+
+		rcsnum_cpy(rdp->rd_num, rev, 0);
 	} else {
 		rcsnum_cpy(file->rf_head, rev, 0);
 	}
@@ -3070,16 +3083,20 @@ static void
 rcs_kwexp_line(char *rcsfile, struct rcs_delta *rdp, struct cvs_line *line,
     int mode)
 {
+	BUF *tmpbuf;
 	int kwtype;
 	u_int j, found;
 	const u_char *c, *start, *fin, *end;
 	char *kwstr;
 	char expbuf[256], buf[256];
 	char *fmt;
-	size_t len, kwlen;
+	size_t clen, kwlen, len, tlen;
 
 	kwtype = 0;
 	kwstr = NULL;
+
+	if (mode & RCS_KWEXP_OLD)
+		return;
 
 	len = line->l_len;
 	if (len == 0)
@@ -3096,187 +3113,225 @@ rcs_kwexp_line(char *rcsfile, struct rcs_delta *rdp, struct cvs_line *line,
 	 * $Keyword: value$
 	 */
 	for (; c < fin; c++) {
-		if (*c == '$') {
-			BUF *tmpbuf;
-			size_t clen, tlen;
+		if (*c != '$')
+			continue;
 
-			/* remember start of this possible keyword */
-			start = c;
+		/* remember start of this possible keyword */
+		start = c;
 
-			/* first following character has to be alphanumeric */
-			c++;
-			if (!isalpha(*c)) {
-				c = start;
-				continue;
+		/* first following character has to be alphanumeric */
+		c++;
+		if (!isalpha(*c)) {
+			c = start;
+			continue;
+		}
+
+		/* Number of characters between c and fin, inclusive. */
+		clen = fin - c + 1;
+
+		/* look for any matching keywords */
+		found = 0;
+		for (j = 0; j < RCS_NKWORDS; j++) {
+			kwlen = strlen(rcs_expkw[j].kw_str);
+			/*
+			 * kwlen must be less than clen since clen
+			 * includes either a terminating `$' or a `:'.
+			 */
+			if (kwlen < clen &&
+			    memcmp(c, rcs_expkw[j].kw_str, kwlen) == 0 &&
+			    (c[kwlen] == '$' || c[kwlen] == ':')) {
+				found = 1;
+				kwstr = rcs_expkw[j].kw_str;
+				kwtype = rcs_expkw[j].kw_type;
+				c += kwlen;
+				break;
 			}
+		}
 
-			/* Number of characters between c and fin, inclusive. */
-			clen = fin - c + 1;
+		if (found == 0 && cvs_tagname != NULL) {
+			kwlen = strlen(cvs_tagname);
+			if (kwlen < clen &&
+			    memcmp(c, cvs_tagname, kwlen) == 0 &&
+			    (c[kwlen] == '$' || c[kwlen] == ':')) {
+				found = 1;
+				kwstr = cvs_tagname;
+				kwtype = RCS_KW_ID;
+				c += kwlen;
+			}
+		}
 
-			/* look for any matching keywords */
-			found = 0;
-			for (j = 0; j < RCS_NKWORDS; j++) {
-				kwlen = strlen(rcs_expkw[j].kw_str);
-				/*
-				 * kwlen must be less than clen since clen
-				 * includes either a terminating `$' or a `:'.
-				 */
-				if (kwlen < clen &&
-				    memcmp(c, rcs_expkw[j].kw_str, kwlen) == 0 &&
-				    (c[kwlen] == '$' || c[kwlen] == ':')) {
-					found = 1;
-					kwstr = rcs_expkw[j].kw_str;
-					kwtype = rcs_expkw[j].kw_type;
-					c += kwlen;
+		/* unknown keyword, continue looking */
+		if (found == 0) {
+			c = start;
+			continue;
+		}
+
+		/*
+		 * if the next character was ':' we need to look for
+		 * an '$' before the end of the line to be sure it is
+		 * in fact a keyword.
+		 */
+		if (*c == ':') {
+			for (; c <= fin; ++c) {
+				if (*c == '$' || *c == '\n')
 					break;
-				}
 			}
 
-			if (found == 0 && cvs_tagname != NULL) {
-				kwlen = strlen(cvs_tagname);
-				if (kwlen < clen &&
-				    memcmp(c, cvs_tagname, kwlen) == 0 &&
-				    (c[kwlen] == '$' || c[kwlen] == ':')) {
-					found = 1;
-					kwstr = cvs_tagname;
-					kwtype = RCS_KW_ID;
-					c += kwlen;
-				}
-			}
-
-			/* unknown keyword, continue looking */
-			if (found == 0) {
+			if (*c != '$') {
 				c = start;
 				continue;
 			}
+		}
+		end = c + 1;
 
-			/*
-			 * if the next character was ':' we need to look for
-			 * an '$' before the end of the line to be sure it is
-			 * in fact a keyword.
-			 */
-			if (*c == ':') {
-				for (; c <= fin; ++c) {
-					if (*c == '$' || *c == '\n')
-						break;
-				}
+		/* start constructing the expansion */
+		expbuf[0] = '\0';
 
-				if (*c != '$') {
-					c = start;
-					continue;
-				}
-			}
-			end = c + 1;
+		if (mode & RCS_KWEXP_NAME) {
+			if (strlcat(expbuf, "$", sizeof(expbuf)) >=
+			    sizeof(expbuf) || strlcat(expbuf, kwstr,
+			    sizeof(expbuf)) >= sizeof(expbuf))
+				fatal("rcs_kwexp_line: truncated");
+			if ((mode & RCS_KWEXP_VAL) &&
+			    strlcat(expbuf, ": ", sizeof(expbuf)) >=
+			    sizeof(expbuf))
+				fatal("rcs_kwexp_line: truncated");
+		}
 
-			/* start constructing the expansion */
-			expbuf[0] = '\0';
-
-			if (mode & RCS_KWEXP_NAME) {
-				if (strlcat(expbuf, "$", sizeof(expbuf)) >= sizeof(expbuf) ||
-				    strlcat(expbuf, kwstr, sizeof(expbuf)) >= sizeof(expbuf))
+		/*
+		 * order matters because of RCS_KW_ID and
+		 * RCS_KW_HEADER here
+		 */
+		if (mode & RCS_KWEXP_VAL) {
+			if (kwtype & RCS_KW_RCSFILE) {
+				if (!(kwtype & RCS_KW_FULLPATH))
+					(void)strlcat(expbuf, basename(rcsfile),
+					    sizeof(expbuf));
+				else
+					(void)strlcat(expbuf, rcsfile,
+					    sizeof(expbuf));
+				if (strlcat(expbuf, " ", sizeof(expbuf)) >=
+				    sizeof(expbuf))
 					fatal("rcs_kwexp_line: truncated");
-				if ((mode & RCS_KWEXP_VAL) &&
-				    strlcat(expbuf, ": ", sizeof(expbuf)) >= sizeof(expbuf))
+			}
+
+			if (kwtype & RCS_KW_REVISION) {
+				rcsnum_tostr(rdp->rd_num, buf, sizeof(buf));
+				if (strlcat(buf, " ", sizeof(buf)) >=
+				    sizeof(buf) || strlcat(expbuf, buf,
+				    sizeof(expbuf)) >= sizeof(buf))
 					fatal("rcs_kwexp_line: truncated");
 			}
 
-			/*
-			 * order matters because of RCS_KW_ID and
-			 * RCS_KW_HEADER here
-			 */
-			if (mode & RCS_KWEXP_VAL) {
-				if (kwtype & RCS_KW_RCSFILE) {
-					if (!(kwtype & RCS_KW_FULLPATH))
-						(void)strlcat(expbuf, basename(rcsfile), sizeof(expbuf));
-					else
-						(void)strlcat(expbuf, rcsfile, sizeof(expbuf));
-					if (strlcat(expbuf, " ", sizeof(expbuf)) >= sizeof(expbuf))
-						fatal("rcs_kwexp_line: truncated");
-				}
+			if (kwtype & RCS_KW_DATE) {
+				fmt = "%Y/%m/%d %H:%M:%S ";
 
-				if (kwtype & RCS_KW_REVISION) {
-					rcsnum_tostr(rdp->rd_num, buf, sizeof(buf));
-					if (strlcat(buf, " ", sizeof(buf)) >= sizeof(buf) ||
-					    strlcat(expbuf, buf, sizeof(expbuf)) >= sizeof(buf))
-						fatal("rcs_kwexp_line: truncated");
-				}
+				if (strftime(buf, sizeof(buf), fmt,
+				    &rdp->rd_date) == 0)
+					fatal("rcs_kwexp_line: strftime "
+					    "failure");
+				if (strlcat(expbuf, buf, sizeof(expbuf)) >=
+				    sizeof(expbuf))
+					fatal("rcs_kwexp_line: string "
+					    "truncated");
+			}
 
-				if (kwtype & RCS_KW_DATE) {
-					fmt = "%Y/%m/%d %H:%M:%S ";
-
-					if (strftime(buf, sizeof(buf), fmt, &rdp->rd_date) == 0)
-						fatal("rcs_kwexp_line: strftime failure");
-					if (strlcat(expbuf, buf, sizeof(expbuf)) >= sizeof(expbuf))
-						fatal("rcs_kwexp_line: string truncated");
-				}
-
-				if (kwtype & RCS_KW_MDOCDATE) {
+			if (kwtype & RCS_KW_MDOCDATE) {
+				/*
+				 * Do not prepend ' ' for a single
+				 * digit, %e would do so and there is
+				 * no better format for strftime().
+				 */
+				if (rdp->rd_date.tm_mday < 10)
+					fmt = "%B%e %Y ";
+				else
 					fmt = "%B %e %Y ";
 
-					if (strftime(buf, sizeof(buf), fmt, &rdp->rd_date) == 0)
-						fatal("rcs_kwexp_line: strftime failure");
-					if (strlcat(expbuf, buf, sizeof(expbuf)) >= sizeof(expbuf))
-						fatal("rcs_kwexp_line: string truncated");
-				}
-
-				if (kwtype & RCS_KW_AUTHOR) {
-					if (strlcat(expbuf, rdp->rd_author, sizeof(expbuf)) >= sizeof(expbuf) ||
-					    strlcat(expbuf, " ", sizeof(expbuf)) >= sizeof(expbuf))
-						fatal("rcs_kwexp_line: string truncated");
-				}
-
-				if (kwtype & RCS_KW_STATE) {
-					if (strlcat(expbuf, rdp->rd_state, sizeof(expbuf)) >= sizeof(expbuf) ||
-					    strlcat(expbuf, " ", sizeof(expbuf)) >= sizeof(expbuf))
-						fatal("rcs_kwexp_line: string truncated");
-				}
-
-				/* order does not matter anymore below */
-				if (kwtype & RCS_KW_LOG)
-					if (strlcat(expbuf, " ", sizeof(expbuf)) >= sizeof(expbuf))
-						fatal("rcs_kwexp_line: string truncated");
-
-				if (kwtype & RCS_KW_SOURCE) {
-					if (strlcat(expbuf, rcsfile, sizeof(expbuf)) >= sizeof(expbuf) ||
-					    strlcat(expbuf, " ", sizeof(expbuf)) >= sizeof(expbuf))
-						fatal("rcs_kwexp_line: string truncated");
-				}
-
-				if (kwtype & RCS_KW_NAME)
-					if (strlcat(expbuf, " ", sizeof(expbuf)) >= sizeof(expbuf))
-						fatal("rcs_kwexp_line: string truncated");
+				if (strftime(buf, sizeof(buf), fmt,
+				    &rdp->rd_date) == 0)
+					fatal("rcs_kwexp_line: strftime "
+					    "failure");
+				if (strlcat(expbuf, buf, sizeof(expbuf)) >=
+				    sizeof(expbuf))
+					fatal("rcs_kwexp_line: string "
+					    "truncated");
 			}
 
-			/* end the expansion */
-			if (mode & RCS_KWEXP_NAME)
-				if (strlcat(expbuf, "$",
+			if (kwtype & RCS_KW_AUTHOR) {
+				if (strlcat(expbuf, rdp->rd_author,
+				    sizeof(expbuf)) >= sizeof(expbuf) ||
+				    strlcat(expbuf, " ", sizeof(expbuf)) >=
+				    sizeof(expbuf))
+					fatal("rcs_kwexp_line: string "
+					    "truncated");
+			}
+
+			if (kwtype & RCS_KW_STATE) {
+				if (strlcat(expbuf, rdp->rd_state,
+				    sizeof(expbuf)) >= sizeof(expbuf) ||
+				    strlcat(expbuf, " ", sizeof(expbuf)) >=
+				    sizeof(expbuf))
+					fatal("rcs_kwexp_line: string "
+					    "truncated");
+			}
+
+			/* order does not matter anymore below */
+			if (kwtype & RCS_KW_LOG)
+				if (strlcat(expbuf, " ", sizeof(expbuf)) >=
+				    sizeof(expbuf))
+					fatal("rcs_kwexp_line: string "
+					    "truncated");
+
+			if (kwtype & RCS_KW_SOURCE) {
+				if (strlcat(expbuf, rcsfile, sizeof(expbuf)) >=
+				    sizeof(expbuf) || strlcat(expbuf, " ",
 				    sizeof(expbuf)) >= sizeof(expbuf))
-					fatal("rcs_kwexp_line: truncated");
+					fatal("rcs_kwexp_line: string "
+					    "truncated");
+			}
 
-			/* Concatenate everything together. */
-			tmpbuf = cvs_buf_alloc(len + strlen(expbuf), BUF_AUTOEXT);
-			/* Append everything before keyword. */
-			cvs_buf_append(tmpbuf, line->l_line,
-			    start - line->l_line);
-			/* Append keyword. */
-			cvs_buf_append(tmpbuf, expbuf, strlen(expbuf));
-			/* Point c to end of keyword. */
-			tlen = cvs_buf_len(tmpbuf) - 1;
-			/* Append everything after keyword. */
-			cvs_buf_append(tmpbuf, end,
-			    line->l_line + line->l_len - end);
-			c = cvs_buf_get(tmpbuf) + tlen;
-			/* Point fin to end of data. */
-			fin = cvs_buf_get(tmpbuf) + cvs_buf_len(tmpbuf) - 1;
-			/* Recalculate new length. */
-			len = cvs_buf_len(tmpbuf);
+			if (kwtype & RCS_KW_NAME)
+				if (strlcat(expbuf, " ", sizeof(expbuf)) >=
+				    sizeof(expbuf))
+					fatal("rcs_kwexp_line: string "
+					    "truncated");
 
-			/* tmpbuf is now ready, convert to string */
-			if (line->l_needsfree)
-				xfree(line->l_line);
-			line->l_len = len;
-			line->l_line = cvs_buf_release(tmpbuf);
-			line->l_needsfree = 1;
+			if (kwtype & RCS_KW_LOCKER)
+				if (strlcat(expbuf, " ", sizeof(expbuf)) >=
+				    sizeof(expbuf))
+					fatal("rcs_kwexp_line: string "
+					    "truncated");
 		}
+
+		/* end the expansion */
+		if (mode & RCS_KWEXP_NAME)
+			if (strlcat(expbuf, "$",
+			    sizeof(expbuf)) >= sizeof(expbuf))
+				fatal("rcs_kwexp_line: truncated");
+
+		/* Concatenate everything together. */
+		tmpbuf = cvs_buf_alloc(len + strlen(expbuf), BUF_AUTOEXT);
+		/* Append everything before keyword. */
+		cvs_buf_append(tmpbuf, line->l_line,
+		    start - line->l_line);
+		/* Append keyword. */
+		cvs_buf_append(tmpbuf, expbuf, strlen(expbuf));
+		/* Point c to end of keyword. */
+		tlen = cvs_buf_len(tmpbuf) - 1;
+		/* Append everything after keyword. */
+		cvs_buf_append(tmpbuf, end,
+		    line->l_line + line->l_len - end);
+		c = cvs_buf_get(tmpbuf) + tlen;
+		/* Point fin to end of data. */
+		fin = cvs_buf_get(tmpbuf) + cvs_buf_len(tmpbuf) - 1;
+		/* Recalculate new length. */
+		len = cvs_buf_len(tmpbuf);
+
+		/* tmpbuf is now ready, convert to string */
+		if (line->l_needsfree)
+			xfree(line->l_line);
+		line->l_len = len;
+		line->l_line = cvs_buf_release(tmpbuf);
+		line->l_needsfree = 1;
 	}
 }

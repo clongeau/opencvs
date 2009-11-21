@@ -1,4 +1,4 @@
-/*	$OpenBSD: client.c,v 1.83 2007/11/11 09:51:49 tobias Exp $	*/
+/*	$OpenBSD: client.c,v 1.89 2008/01/10 11:20:29 tobias Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -91,7 +91,7 @@ struct cvs_req cvs_requests[] = {
 	    REQ_NEEDDIR },
 	{ "rdiff",			0,	NULL, 0 },
 	{ "tag",			0,	cvs_server_tag, REQ_NEEDDIR },
-	{ "rtag",			0,	NULL, 0 },
+	{ "rtag",			0,	cvs_server_rtag, 0 },
 	{ "import",			0,	cvs_server_import,
 	    REQ_NEEDDIR },
 	{ "admin",			0,	cvs_server_admin, REQ_NEEDDIR },
@@ -456,7 +456,7 @@ cvs_client_sendfile(struct cvs_file *cf)
 	if (cf->file_type == CVS_DIR)
 		return;
 
-	if (cf->file_ent != NULL) {
+	if (cf->file_ent != NULL && cvs_cmdop != CVS_OP_IMPORT) {
 		if (cf->file_status == FILE_ADDED) {
 			len = strlcpy(rev, "0", sizeof(rev));
 			if (len >= sizeof(rev))
@@ -475,8 +475,7 @@ cvs_client_sendfile(struct cvs_file *cf)
 		}
 
 		if (cf->file_ent->ce_conflict == NULL) {
-			if (timebuf[strlen(timebuf) - 1] == '\n')
-				timebuf[strlen(timebuf) - 1] = '\0';
+			timebuf[strcspn(timebuf, "\n")] = '\0';
 		} else {
 			len = strlcpy(timebuf, cf->file_ent->ce_conflict,
 			    sizeof(timebuf));
@@ -498,6 +497,9 @@ cvs_client_sendfile(struct cvs_file *cf)
 		    rev, timebuf, cf->file_ent->ce_opts ?
 		    cf->file_ent->ce_opts : "", sticky);
 	}
+
+	if (cvs_cmdop == CVS_OP_ADD)
+		cf->file_status = FILE_MODIFIED;
 
 	switch (cf->file_status) {
 	case FILE_UNKNOWN:
@@ -594,6 +596,7 @@ cvs_client_checkedin(char *data)
 {
 	CVSENTRIES *entlist;
 	struct cvs_ent *ent, *newent;
+	size_t len;
 	char *dir, *e, entry[CVS_ENT_MAXLINELEN], rev[CVS_REV_BUFSZ];
 	char sticky[CVS_ENT_MAXLINELEN], timebuf[CVS_TIME_BUFSZ];
 
@@ -610,19 +613,36 @@ cvs_client_checkedin(char *data)
 	xfree(e);
 
 	rcsnum_tostr(newent->ce_rev, rev, sizeof(rev));
-	ctime_r(&ent->ce_mtime, timebuf);
-	if (timebuf[strlen(timebuf) - 1] == '\n')
-		timebuf[strlen(timebuf) - 1] = '\0';
 
 	sticky[0] = '\0';
-	if (ent->ce_tag != NULL)
-		(void)xsnprintf(sticky, sizeof(sticky), "T%s", ent->ce_tag);
+	if (ent == NULL) {
+		len = strlcpy(rev, "0", sizeof(rev));
+		if (len >= sizeof(rev))
+			fatal("cvs_client_sendfile: truncation");
+
+		len = strlcpy(timebuf, "Initial ", sizeof(timebuf));
+		if (len >= sizeof(timebuf))
+			fatal("cvs_client_sendfile: truncation");
+
+		len = strlcat(timebuf, newent->ce_name, sizeof(timebuf));
+		if (len >= sizeof(timebuf))
+			fatal("cvs_client_sendfile: truncation");
+	} else {
+		ctime_r(&ent->ce_mtime, timebuf);
+		timebuf[strcspn(timebuf, "\n")] = '\0';
+
+		if (newent->ce_tag != NULL)
+			(void)xsnprintf(sticky, sizeof(sticky), "T%s",
+			    ent->ce_tag);
+		newent->ce_opts = ent->ce_opts;
+
+		cvs_ent_free(ent);
+	}
 
 	(void)xsnprintf(entry, CVS_ENT_MAXLINELEN, "/%s/%s%s/%s/%s/%s",
 	    newent->ce_name, (newent->ce_status == CVS_ENT_REMOVED) ? "-" : "",
-	    rev, timebuf, ent->ce_opts ? ent->ce_opts : "", sticky);
+	    rev, timebuf, newent->ce_opts ? newent->ce_opts : "", sticky);
 
-	cvs_ent_free(ent);
 	cvs_ent_free(newent);
 	cvs_ent_add(entlist, entry);
 	cvs_ent_close(entlist, ENT_SYNC);
@@ -678,8 +698,7 @@ cvs_client_updated(char *data)
 
 	time(&now);
 	asctime_r(gmtime(&now), timebuf);
-	if (timebuf[strlen(timebuf) - 1] == '\n')
-		timebuf[strlen(timebuf) - 1] = '\0';
+	timebuf[strcspn(timebuf, "\n")] = '\0';
 
 	e = cvs_ent_parse(en);
 	xfree(en);
@@ -772,12 +791,12 @@ cvs_client_merged(char *data)
 
 	time(&now);
 	asctime_r(gmtime(&now), timebuf);
-	if (timebuf[strlen(timebuf) - 1] == '\n')
-		timebuf[strlen(timebuf) - 1] = '\0';
+	timebuf[strcspn(timebuf, "\n")] = '\0';
 
 	ent = cvs_ent_open(wdir);
 	cvs_ent_add(ent, entry);
 	cvs_ent_close(ent, ENT_SYNC);
+	xfree(entry);
 
 	if ((fd = open(fpath, O_CREAT | O_WRONLY | O_TRUNC)) == -1)
 		fatal("cvs_client_merged: open: %s: %s",
@@ -993,7 +1012,7 @@ cvs_client_initlog(void)
 		s++;
 		switch (*s) {
 		case 'c':
-			if (strlcpy(fpath, cvs_command, sizeof(fpath)) >=
+			if (strlcpy(fpath, cmdp->cmd_name, sizeof(fpath)) >=
 			    sizeof(fpath))
 				fatal("cvs_client_initlog: truncation");
 			break;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcs.h,v 1.81 2007/11/11 10:01:41 tobias Exp $	*/
+/*	$OpenBSD: rcs.h,v 1.84 2008/01/10 10:06:59 tobias Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -80,12 +80,12 @@
 #define RCS_KW_HEADER	(RCS_KW_ID | RCS_KW_FULLPATH)
 
 /* RCS keyword expansion modes (kflags) */
-#define RCS_KWEXP_NONE	0x00
-#define RCS_KWEXP_NAME	0x01	/* include keyword name */
-#define RCS_KWEXP_VAL	0x02	/* include keyword value */
-#define RCS_KWEXP_LKR	0x04	/* include name of locker */
-#define RCS_KWEXP_OLD	0x08	/* generate old keyword string */
-#define RCS_KWEXP_ERR	0x10	/* mode has an error */
+#define RCS_KWEXP_NONE	0x01	/* do not expand keywords */
+#define RCS_KWEXP_NAME	0x02	/* include keyword name */
+#define RCS_KWEXP_VAL	0x04	/* include keyword value */
+#define RCS_KWEXP_LKR	0x08	/* include name of locker */
+#define RCS_KWEXP_OLD	0x10	/* generate old keyword string */
+#define RCS_KWEXP_ERR	0x20	/* mode has an error */
 
 #define RCS_KWEXP_DEFAULT	(RCS_KWEXP_NAME | RCS_KWEXP_VAL)
 #define RCS_KWEXP_KVL		(RCS_KWEXP_NAME | RCS_KWEXP_VAL | RCS_KWEXP_LKR)
@@ -241,7 +241,6 @@ int			 rcs_lock_getmode(RCSFILE *);
 int			 rcs_lock_setmode(RCSFILE *, int);
 int			 rcs_lock_add(RCSFILE *, const char *, RCSNUM *);
 int			 rcs_lock_remove(RCSFILE *, const char *, RCSNUM *);
-BUF			*rcs_getrev(RCSFILE *, RCSNUM *);
 int			 rcs_deltatext_set(RCSFILE *, RCSNUM *, BUF *);
 const char		*rcs_desc_get(RCSFILE *);
 void			 rcs_desc_set(RCSFILE *, const char *);
@@ -281,6 +280,7 @@ RCSNUM	*rcsnum_revtobr(const RCSNUM *);
 RCSNUM	*rcsnum_inc(RCSNUM *);
 RCSNUM	*rcsnum_dec(RCSNUM *);
 RCSNUM	*rcsnum_branch_root(RCSNUM *);
+RCSNUM	*rcsnum_new_branch(RCSNUM *);
 void	 rcsnum_free(RCSNUM *);
 int	 rcsnum_aton(const char *, char **, RCSNUM *);
 char	*rcsnum_tostr(const RCSNUM *, char *, size_t);

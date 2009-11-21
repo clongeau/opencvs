@@ -1,3 +1,15 @@
+2008-01-11  chl  <chl@tuxfamily.org>
+
+	- update from the latest OpenCVS cvs repo (source and regress).
+
+2007-12-27  chl  <chl@tuxfamily.org>
+
+	- update from the latest OpenCVS cvs repo (source).
+	- make it build on MacOS X (thanks to Elias Pipping for the
+	repport and help)
+	- replace autogen.sh script by
+	http://sam.zoy.org/autotools/bootstrap
+
 2007-10-12  chl  <chl@tuxfamily.org>
 
 	- update from the latest OpenCVS cvs repo (source and regress).

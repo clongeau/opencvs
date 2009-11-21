@@ -1,4 +1,4 @@
-/*	$OpenBSD: file.c,v 1.205 2007/11/09 16:21:24 tobias Exp $	*/
+/*	$OpenBSD: file.c,v 1.209 2008/01/10 11:21:34 tobias Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
@@ -217,8 +217,7 @@ cvs_file_get_cf(const char *d, const char *f, int fd, int type)
 	for (p = rpath; p[0] == '.' && p[1] == '/';)
 		p += 2;
 
-	cf = (struct cvs_file *)xmalloc(sizeof(*cf));
-	memset(cf, 0, sizeof(*cf));
+	cf = (struct cvs_file *)xcalloc(1, sizeof(*cf));
 
 	cf->file_name = xstrdup(f);
 	cf->file_wd = xstrdup(d);
@@ -386,6 +385,7 @@ cvs_file_walkdir(struct cvs_file *cf, struct cvs_recursion *cr)
 
 	l = stat(fpath, &st);
 	if (cvs_cmdop != CVS_OP_IMPORT && cvs_cmdop != CVS_OP_RLOG &&
+	    cvs_cmdop != CVS_OP_RTAG &&
 	    (l == -1 || (l == 0 && !S_ISDIR(st.st_mode)))) {
 		return;
 	}
@@ -442,7 +442,9 @@ cvs_file_walkdir(struct cvs_file *cf, struct cvs_recursion *cr)
 				continue;
 			}
 
-			if (cvs_file_chkign(dp->d_name)) {
+			if (cvs_file_chkign(dp->d_name) &&
+			    cvs_cmdop != CVS_OP_RLOG &&
+			    cvs_cmdop != CVS_OP_RTAG) {
 				cp += dp->d_reclen;
 				continue;
 			}
@@ -606,7 +608,8 @@ cvs_file_classify(struct cvs_file *cf, const char *tag)
 	(void)xsnprintf(rcsfile, MAXPATHLEN, "%s/%s",
 	    repo, cf->file_name);
 
-	if (cf->file_type == CVS_FILE) {
+	if (cvs_cmdop != CVS_OP_RLOG && cvs_cmdop != CVS_OP_RTAG &&
+	    cf->file_type == CVS_FILE) {
 		len = strlcat(rcsfile, RCS_FILE_EXT, MAXPATHLEN);
 		if (len >= MAXPATHLEN)
 			fatal("cvs_file_classify: truncation");
@@ -615,6 +618,7 @@ cvs_file_classify(struct cvs_file *cf, const char *tag)
 	cf->file_rpath = xstrdup(rcsfile);
 	entlist = cvs_ent_open(cf->file_wd);
 	cf->file_ent = cvs_ent_get(entlist, cf->file_name);
+	cvs_ent_close(entlist, ENT_NOSYNC);
 
 	if (cf->file_ent != NULL) {
 		if (cf->file_ent->ce_type == CVS_ENT_DIR &&
@@ -633,12 +637,12 @@ cvs_file_classify(struct cvs_file *cf, const char *tag)
 	if (cf->file_type == CVS_DIR) {
 		if (cf->fd == -1 && stat(rcsfile, &st) != -1)
 			cf->file_status = DIR_CREATE;
-		else if (cf->file_ent != NULL || cvs_cmdop == CVS_OP_RLOG)
+		else if (cf->file_ent != NULL || cvs_cmdop == CVS_OP_RLOG ||
+		    cvs_cmdop == CVS_OP_RTAG)
 			cf->file_status = FILE_UPTODATE;
 		else
 			cf->file_status = FILE_UNKNOWN;
 
-		cvs_ent_close(entlist, ENT_NOSYNC);
 		return;
 	}
 
@@ -650,7 +654,10 @@ cvs_file_classify(struct cvs_file *cf, const char *tag)
 	case CVS_OP_IMPORT:
 	case CVS_OP_LOG:
 	case CVS_OP_RLOG:
+	case CVS_OP_RTAG:
 		rflags |= RCS_PARSE_FULLY;
+		break;
+	default:
 		break;
 	}
 
@@ -684,9 +691,11 @@ cvs_file_classify(struct cvs_file *cf, const char *tag)
 		    cf->file_rcs)) != NULL) {
 			rcsnum_tostr(cf->file_rcsrev, r1, sizeof(r1));
 		} else {
-			notag = 1;
 			cf->file_rcsrev = rcs_head_get(cf->file_rcs);
-			cf->file_flags &= ~FILE_HAS_TAG;
+			if (cf->file_rcsrev != NULL) {
+				notag = 1;
+				cf->file_flags &= ~FILE_HAS_TAG;
+			}
 		}
 	} else if (cf->file_ent != NULL && cf->file_ent->ce_tag != NULL) {
 		cf->file_rcsrev = rcsnum_alloc();
@@ -778,7 +787,12 @@ cvs_file_classify(struct cvs_file *cf, const char *tag)
 		} else {
 			cf->file_status = FILE_UPTODATE;
 		}
-	} else if (cf->file_ent->ce_status == CVS_ENT_ADDED) {
+
+		return;
+	}
+
+	switch (cf->file_ent->ce_status) {
+	case CVS_ENT_ADDED:
 		if (cf->fd == -1) {
 			if (cvs_cmdop != CVS_OP_REMOVE) {
 				cvs_log(LP_NOTICE,
@@ -794,7 +808,8 @@ cvs_file_classify(struct cvs_file *cf, const char *tag)
 			    cf->file_path);
 			cf->file_status = FILE_CONFLICT;
 		}
-	} else if (cf->file_ent->ce_status == CVS_ENT_REMOVED) {
+		break;
+	case CVS_ENT_REMOVED:
 		if (cf->fd != -1) {
 			cvs_log(LP_NOTICE,
 			    "%s should be removed but is still there",
@@ -813,7 +828,8 @@ cvs_file_classify(struct cvs_file *cf, const char *tag)
 				cf->file_status = FILE_REMOVED;
 			}
 		}
-	} else if (cf->file_ent->ce_status == CVS_ENT_REG) {
+		break;
+	case CVS_ENT_REG:
 		if (cf->file_rcs == NULL || rcsdead == 1 ||
 		    (reset_stickies == 1 && cf->in_attic == 1) ||
 		    (notag == 1 && tag != NULL)) {
@@ -864,9 +880,10 @@ cvs_file_classify(struct cvs_file *cf, const char *tag)
 				}
 			}
 		}
+		break;
+	default:
+		break;
 	}
-
-	cvs_ent_close(entlist, ENT_NOSYNC);
 }
 
 void

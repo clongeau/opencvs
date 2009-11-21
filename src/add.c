@@ -1,4 +1,4 @@
-/*	$OpenBSD: add.c,v 1.82 2007/09/23 11:19:24 joris Exp $	*/
+/*	$OpenBSD: add.c,v 1.86 2008/01/10 10:08:22 tobias Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  * Copyright (c) 2005, 2006 Xavier Santolaria <xsa@openbsd.org>
@@ -29,6 +29,7 @@ extern char *__progname;
 
 void	cvs_add_local(struct cvs_file *);
 void	cvs_add_entry(struct cvs_file *);
+void	cvs_add_remote(struct cvs_file *);
 
 static void add_directory(struct cvs_file *);
 static void add_file(struct cvs_file *);
@@ -89,7 +90,7 @@ cvs_add(int argc, char **argv)
 
 	if (current_cvsroot->cr_method != CVS_METHOD_LOCAL) {
 		cvs_client_connect_to_server();
-		cr.fileproc = cvs_client_sendfile;
+		cr.fileproc = cvs_add_remote;
 
 		if (kflag != RCS_KWEXP_DEFAULT)
 			cvs_client_send_request("Argument %s", kbuf);
@@ -105,8 +106,8 @@ cvs_add(int argc, char **argv)
 	cvs_file_run(argc, argv, &cr);
 
 	if (current_cvsroot->cr_method != CVS_METHOD_LOCAL) {
-		cvs_client_send_files(argv, argc);
 		cvs_client_senddir(".");
+		cvs_client_send_files(argv, argc);
 		cvs_client_send_request("add");
 		cvs_client_get_responses();
 
@@ -161,6 +162,30 @@ cvs_add_local(struct cvs_file *cf)
 		add_file(cf);
 }
 
+void
+cvs_add_remote(struct cvs_file *cf)
+{
+	char path[MAXPATHLEN];
+
+	cvs_log(LP_TRACE, "cvs_add_remote(%s)", cf->file_path);
+
+	cvs_file_classify(cf, cvs_directory_tag);
+
+	if (cf->file_type == CVS_DIR) {
+		cvs_get_repository_path(cf->file_wd, path, MAXPATHLEN);
+		if (strlcat(path, "/", sizeof(path)) >= sizeof(path))
+			fatal("cvs_add_remote: truncation");
+		if (strlcat(path, cf->file_path, sizeof(path)) >= sizeof(path))
+			fatal("cvs_add_remote: truncation");
+		cvs_client_send_request("Directory %s\n%s", cf->file_path,
+		    path);
+
+		add_directory(cf);
+	} else {
+		cvs_client_sendfile(cf);
+	}
+}
+
 static void
 add_directory(struct cvs_file *cf)
 {
@@ -187,7 +212,12 @@ add_directory(struct cvs_file *cf)
 		(void)xsnprintf(entry, MAXPATHLEN, "%s/%s",
 		    cf->file_path, CVS_PATH_CVSDIR);
 
-		if (stat(entry, &st) != -1) {
+		if (cvs_server_active) {
+			if (mkdir(cf->file_rpath, 0755) == -1 &&
+			    errno != EEXIST)
+				fatal("add_directory: %s: %s", cf->file_rpath,
+				    strerror(errno));
+		} else if (stat(entry, &st) != -1) {
 			if (!S_ISDIR(st.st_mode)) {
 				cvs_log(LP_ERR, "%s exists but is not "
 				    "directory", entry);
@@ -199,7 +229,7 @@ add_directory(struct cvs_file *cf)
 		} else if (cvs_noexec != 1) {
 			if (mkdir(cf->file_rpath, 0755) == -1 &&
 			    errno != EEXIST)
-				fatal("add_directory: %s: %s", cf->file_path,
+				fatal("add_directory: %s: %s", cf->file_rpath,
 				    strerror(errno));
 
 			cvs_get_repository_name(cf->file_wd, repo,
@@ -221,7 +251,7 @@ add_directory(struct cvs_file *cf)
 		}
 	}
 
-	if (added == 1) {
+	if (added == 1 && current_cvsroot->cr_method == CVS_METHOD_LOCAL) {
 		(void)xsnprintf(msg, sizeof(msg),
 		    "Directory %s added to the repository", cf->file_rpath);
 
@@ -257,6 +287,9 @@ add_file(struct cvs_file *cf)
 
 	if (cf->file_rcs != NULL) {
 		head = rcs_head_get(cf->file_rcs);
+		if (head == NULL)
+			fatal("RCS head empty or missing in %s\n",
+			    cf->file_rcs->rf_path);
 		rcsnum_tostr(head, revbuf, sizeof(revbuf));
 		rcsnum_free(head);
 	}
@@ -278,6 +311,9 @@ add_file(struct cvs_file *cf)
 
 			/* Restore the file. */
 			head = rcs_head_get(cf->file_rcs);
+			if (head == NULL)
+				fatal("RCS head empty or missing in %s\n",
+				    cf->file_rcs->rf_path);
 			cvs_checkout_file(cf, head, NULL, 0);
 			rcsnum_free(head);
 
@@ -345,8 +381,7 @@ add_entry(struct cvs_file *cf)
 		rcsnum_tostr(cf->file_ent->ce_rev, revbuf, sizeof(revbuf));
 
 		ctime_r(&cf->file_ent->ce_mtime, tbuf);
-		if (tbuf[strlen(tbuf) - 1] == '\n')
-			tbuf[strlen(tbuf) - 1] = '\0';
+		tbuf[strcspn(tbuf, "\n")] = '\0';
 
 		/* Remove the '-' prefixing the version number. */
 		(void)xsnprintf(entry, CVS_ENT_MAXLINELEN,
@@ -374,7 +409,13 @@ add_entry(struct cvs_file *cf)
 		    (kflag != RCS_KWEXP_DEFAULT) ? kbuf : "");
 	}
 
-	entlist = cvs_ent_open(cf->file_wd);
-	cvs_ent_add(entlist, entry);
-	cvs_ent_close(entlist, ENT_SYNC);
+	if (cvs_server_active) {
+		cvs_server_send_response("Checked-in %s/", cf->file_wd);
+		cvs_server_send_response(cf->file_path);
+		cvs_server_send_response(entry);
+	} else {
+		entlist = cvs_ent_open(cf->file_wd);
+		cvs_ent_add(entlist, entry);
+		cvs_ent_close(entlist, ENT_SYNC);
+	}
 }

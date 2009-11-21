@@ -1,4 +1,4 @@
-/*	$OpenBSD: server.c,v 1.73 2007/11/09 16:27:38 tobias Exp $	*/
+/*	$OpenBSD: server.c,v 1.75 2008/01/10 11:20:29 tobias Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -637,15 +637,7 @@ cvs_server_log(char *data)
 void
 cvs_server_rlog(char *data)
 {
-	char fpath[MAXPATHLEN];
-	struct cvsroot *cvsroot;
-
-	cvsroot = cvsroot_get(NULL);
-
-	(void)xsnprintf(fpath, MAXPATHLEN, "%s/%s",
-	    cvsroot->cr_dir, server_currentdir);
-
-	if (chdir(fpath) == -1)
+	if (chdir(current_cvsroot->cr_dir) == -1)
 		fatal("cvs_server_rlog: %s", strerror(errno));
 
 	cvs_cmdop = CVS_OP_RLOG;
@@ -660,6 +652,17 @@ cvs_server_tag(char *data)
 		fatal("cvs_server_tag: %s", strerror(errno));
 
 	cvs_cmdop = CVS_OP_TAG;
+	cvs_tag(server_argc, server_argv);
+	cvs_server_send_response("ok");
+}
+
+void
+cvs_server_rtag(char *data)
+{
+	if (chdir(current_cvsroot->cr_dir) == -1)
+		fatal("cvs_server_rlog: %s", strerror(errno));
+
+	cvs_cmdop = CVS_OP_RTAG;
 	cvs_tag(server_argc, server_argv);
 	cvs_server_send_response("ok");
 }

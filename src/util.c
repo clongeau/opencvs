@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.121 2007/10/09 12:14:09 tobias Exp $	*/
+/*	$OpenBSD: util.c,v 1.124 2008/01/10 10:09:27 tobias Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * Copyright (c) 2005, 2006 Joris Vink <joris@openbsd.org>
@@ -470,7 +470,7 @@ void
 cvs_get_repository_name(const char *dir, char *dst, size_t len)
 {
 	FILE *fp;
-	char *s, fpath[MAXPATHLEN];
+	char fpath[MAXPATHLEN];
 
 	/* During checkout -p, do not use any locally available files. */
 	if (cvs_cmdop == CVS_OP_CHECKOUT && print_stdout) {
@@ -486,10 +486,7 @@ cvs_get_repository_name(const char *dir, char *dst, size_t len)
 	if (cvs_cmdop != CVS_OP_IMPORT && (fp = fopen(fpath, "r")) != NULL) {
 		if ((fgets(dst, len, fp)) == NULL)
 			fatal("cvs_get_repository_name: bad repository file");
-
-		if ((s = strchr(dst, '\n')) != NULL)
-			*s = '\0';
-
+		dst[strcspn(dst, "\n")] = '\0';
 		(void)fclose(fp);
 	} else {
 		dst[0] = '\0';
@@ -565,10 +562,11 @@ cvs_mkadmin(const char *path, const char *root, const char *repo,
 void
 cvs_mkpath(const char *path, char *tag)
 {
+	CVSENTRIES *ent;
 	FILE *fp;
 	size_t len;
-	char sticky[CVS_REV_BUFSZ];
-	char *sp, *dp, *dir, rpath[MAXPATHLEN], repo[MAXPATHLEN];
+	char entry[CVS_ENT_MAXLINELEN], sticky[CVS_REV_BUFSZ];
+	char *sp, *dp, *dir, *p, rpath[MAXPATHLEN], repo[MAXPATHLEN];
 
 	dir = xstrdup(path);
 
@@ -620,6 +618,17 @@ cvs_mkpath(const char *path, char *tag)
 		cvs_mkadmin(rpath, current_cvsroot->cr_str, repo,
 		    tag, NULL, 0);
 
+		if (dp != NULL) {
+			if ((p = strchr(dp, '/')) != NULL)
+				*p = '\0';
+			ent = cvs_ent_open(rpath);
+			xsnprintf(entry, sizeof(entry), "D/%s/////", dp);
+			cvs_ent_add(ent, entry);
+			cvs_ent_close(ent, ENT_SYNC);
+			if (p != NULL)
+				*p = '/';
+		}
+
 		if (cvs_server_active == 1 && strcmp(rpath, ".")) {
 			if (tag != NULL) {
 				(void)xsnprintf(sticky, sizeof(sticky),
@@ -643,20 +652,17 @@ cvs_splitlines(u_char *data, size_t len)
 	struct cvs_lines *lines;
 	struct cvs_line *lp;
 
-	lines = xmalloc(sizeof(*lines));
-	memset(lines, 0, sizeof(*lines));
+	lines = xcalloc(1, sizeof(*lines));
 	TAILQ_INIT(&(lines->l_lines));
 
-	lp = xmalloc(sizeof(*lp));
-	memset(lp, 0, sizeof(*lp));
+	lp = xcalloc(1, sizeof(*lp));
 	TAILQ_INSERT_TAIL(&(lines->l_lines), lp, l_list);
 
 	p = c = data;
 	for (i = 0; i < len; i++) {
 		if (*p == '\n' || (i == len - 1)) {
 			tlen = p - c + 1;
-			lp = xmalloc(sizeof(*lp));
-			memset(lp, 0, sizeof(*lp));
+			lp = xcalloc(1, sizeof(*lp));
 			lp->l_line = c;
 			lp->l_len = tlen;
 			lp->l_lineno = ++(lines->l_nblines);

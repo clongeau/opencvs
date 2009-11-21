@@ -1,4 +1,4 @@
-/*	$OpenBSD: commit.c,v 1.115 2007/10/08 14:13:13 joris Exp $	*/
+/*	$OpenBSD: commit.c,v 1.117 2008/01/10 09:54:04 tobias Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  * Copyright (c) 2006 Xavier Santolaria <xsa@openbsd.org>
@@ -299,6 +299,9 @@ cvs_commit_local(struct cvs_file *cf)
 	    && cf->file_rcs != NULL && cf->file_rcs->rf_dead == 1)) {
 		rrev = rcs_head_get(cf->file_rcs);
 		crev = rcs_head_get(cf->file_rcs);
+		if (crev == NULL || rrev == NULL)
+			fatal("RCS head empty or missing in %s\n",
+			    cf->file_rcs->rf_path);
 
 		tag = cvs_directory_tag;
 		if (cf->file_ent != NULL && cf->file_ent->ce_tag != NULL)
@@ -518,7 +521,7 @@ commit_diff(struct cvs_file *cf, RCSNUM *rev, int reverse)
 	}
 
 	(void)xasprintf(&p2, "%s/diff2.XXXXXXXXXX", cvs_tmpdir);
-	rcs_rev_write_stmp(cf->file_rcs, rev, p2, 0);
+	rcs_rev_write_stmp(cf->file_rcs, rev, p2, RCS_KWEXP_NONE);
 
 	if ((b2 = cvs_buf_alloc(128, BUF_AUTOEXT)) == NULL)
 		fatal("commit_diff: failed to create diff buf");

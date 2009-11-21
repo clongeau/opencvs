@@ -1,4 +1,4 @@
-AC_INIT([OpenCVS],[4.2.0],[Charles Longeau <chl@openbsd.org>],[OpenCVS])
+AC_INIT([OpenCVS],[4.2.0],[Charles Longeau <chl@openbsd.org>])
 AM_INIT_AUTOMAKE
 
 # Checks for programs.
@@ -202,10 +202,23 @@ if test "x$ac_cv_have_getopt_optreset" = "xyes" ; then
 		[Define if your getopt(3) defines and uses optreset])
 fi
 
-
 AC_DEFINE([_GNU_SOURCE], [], [Enable GNU Extensions])
 
-CFLAGS="$CFLAGS -Wall"
+AC_ARG_WITH(Werror,
+	[  --with-Werror           Build main code with -Werror],
+	[
+		if test -n "$withval"  &&  test "x$withval" != "xno"; then
+			werror_flags="-Werror"
+			if test "x${withval}" != "xyes"; then
+				werror_flags="$withval"
+			fi
+		fi
+	]
+)
+
+dnl Adding -Werror to CFLAGS early prevents configure tests from running.
+dnl Add now.
+CFLAGS="$CFLAGS $werror_flags"
 
 AC_CONFIG_HEADER(config.h)
 AC_CONFIG_FILES([Makefile

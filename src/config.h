@@ -1,4 +1,4 @@
-/*	$OpenBSD: config.h,v 1.7 2008/02/04 19:08:32 joris Exp $	*/
+/*	$OpenBSD: config.h,v 1.9 2008/02/06 22:43:22 joris Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -18,6 +18,8 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
+void cvs_modules_list(void);
+
 void cvs_read_config(char *name, void (*cb)(char *, int));
 
 void cvs_parse_configfile(void);
@@ -35,6 +37,7 @@ void modules_parse_line(char *, int);
 #define MODULE_TARGETDIR	0x02
 #define MODULE_NORECURSE	0x04
 #define MODULE_RUN_ON_COMMIT	0x08
+#define MODULE_RUN_ON_CHECKOUT	0x10
 
 struct module_checkout {
 	char			*mc_name;
@@ -50,6 +53,7 @@ struct module_checkout {
 struct module_info {
 	char				*mi_name;
 	char				*mi_prog;
+	char				*mi_str;
 	int				 mi_flags;
 
 	struct cvs_flisthead		 mi_modules;

@@ -3,8 +3,7 @@ Unices.
 
 This port consists of the re-introduction of autoconf support, and
 replacements for OpenBSD library functions that are (regrettably)
-absent from other unices. This port has been best tested on Linux only
-for now.
+absent from other unices.
 
 This version actively tracks changes in the OpenBSD CVS repository.
 

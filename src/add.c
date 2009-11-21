@@ -1,4 +1,4 @@
-/*	$OpenBSD: add.c,v 1.92 2008/02/04 19:54:21 joris Exp $	*/
+/*	$OpenBSD: add.c,v 1.94 2008/02/09 20:04:00 xsa Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  * Copyright (c) 2005, 2006 Xavier Santolaria <xsa@openbsd.org>
@@ -122,16 +122,19 @@ cvs_add(int argc, char **argv)
 void
 cvs_add_entry(struct cvs_file *cf)
 {
-	char entry[CVS_ENT_MAXLINELEN];
+	char *entry;
 	CVSENTRIES *entlist;
 
 	if (cf->file_type == CVS_DIR) {
-		(void)xsnprintf(entry, CVS_ENT_MAXLINELEN,
-		    "D/%s////", cf->file_name);
+		entry = xmalloc(CVS_ENT_MAXLINELEN);
+		cvs_ent_line_str(cf->file_name, NULL, NULL, NULL, NULL, 1, 0,
+		    entry, CVS_ENT_MAXLINELEN);
 
 		entlist = cvs_ent_open(cf->file_wd);
 		cvs_ent_add(entlist, entry);
 		cvs_ent_close(entlist, ENT_SYNC);
+
+		xfree(entry);
 	} else {
 		add_entry(cf);
 	}
@@ -241,8 +244,9 @@ add_directory(struct cvs_file *cf)
 			    entry, tag, date);
 
 			p = xmalloc(CVS_ENT_MAXLINELEN);
-			(void)xsnprintf(p, CVS_ENT_MAXLINELEN,
-			    "D/%s////", cf->file_name);
+			cvs_ent_line_str(cf->file_name, NULL, NULL, NULL,
+			    NULL, 1, 0, p, CVS_ENT_MAXLINELEN);
+
 			entlist = cvs_ent_open(cf->file_wd);
 			cvs_ent_add(entlist, p);
 			cvs_ent_close(entlist, ENT_SYNC);
@@ -280,9 +284,16 @@ add_directory(struct cvs_file *cf)
 static void
 add_file(struct cvs_file *cf)
 {
-	int added, stop;
+	int added, nb, stop;
 	char revbuf[CVS_REV_BUFSZ];
 	RCSNUM *head;
+	char *tag;
+
+	cvs_parse_tagfile(cf->file_wd, &tag, NULL, &nb);
+	if (nb) {
+		cvs_log(LP_ERR, "cannot add file on non-branch tag %s", tag);
+		return;
+	}
 
 	if (cf->file_rcs != NULL) {
 		head = rcs_head_get(cf->file_rcs);
@@ -369,12 +380,16 @@ static void
 add_entry(struct cvs_file *cf)
 {
 	FILE *fp;
-	char entry[CVS_ENT_MAXLINELEN], path[MAXPATHLEN];
+	char *entry, path[MAXPATHLEN];
 	char revbuf[CVS_REV_BUFSZ], tbuf[CVS_TIME_BUFSZ];
+	char sticky[CVS_ENT_MAXLINELEN];
 	CVSENTRIES *entlist;
 
 	if (cvs_noexec == 1)
 		return;
+
+	sticky[0] = '\0';
+	entry = xmalloc(CVS_ENT_MAXLINELEN);
 
 	if (cf->file_status == FILE_REMOVED) {
 		rcsnum_tostr(cf->file_ent->ce_rev, revbuf, sizeof(revbuf));
@@ -382,10 +397,14 @@ add_entry(struct cvs_file *cf)
 		ctime_r(&cf->file_ent->ce_mtime, tbuf);
 		tbuf[strcspn(tbuf, "\n")] = '\0';
 
+		if (cf->file_ent->ce_tag != NULL)
+			(void)xsnprintf(sticky, sizeof(sticky), "T%s",
+			    cf->file_ent->ce_tag);
+
 		/* Remove the '-' prefixing the version number. */
-		(void)xsnprintf(entry, CVS_ENT_MAXLINELEN,
-		    "/%s/%s/%s/%s/", cf->file_name, revbuf, tbuf,
-		    cf->file_ent->ce_opts ? cf->file_ent->ce_opts : "");
+		cvs_ent_line_str(cf->file_name, revbuf, tbuf,
+		    cf->file_ent->ce_opts ? cf->file_ent->ce_opts : "", sticky,
+		    0, 0, entry, CVS_ENT_MAXLINELEN);
 	} else {
 		if (logmsg != NULL) {
 			(void)xsnprintf(path, MAXPATHLEN, "%s/%s%s",
@@ -403,9 +422,18 @@ add_entry(struct cvs_file *cf)
 			(void)fclose(fp);
 		}
 
-		(void)xsnprintf(entry, CVS_ENT_MAXLINELEN,
-		    "/%s/0/Initial %s/%s/", cf->file_name, cf->file_name,
-		    kflag ? kbuf : "");
+		if (cvs_directory_tag != NULL)
+			(void)xsnprintf(sticky, sizeof(sticky), "T%s",
+			    cvs_directory_tag);
+
+		tbuf[0] = '\0';
+		if (!cvs_server_active)
+			(void)xsnprintf(tbuf, sizeof(tbuf), "Initial %s",
+			    cf->file_name);
+
+		
+		cvs_ent_line_str(cf->file_name, "0", tbuf, kflag ? kbuf : "",
+		    sticky, 0, 0, entry, CVS_ENT_MAXLINELEN);
 	}
 
 	if (cvs_server_active) {
@@ -417,4 +445,5 @@ add_entry(struct cvs_file *cf)
 		cvs_ent_add(entlist, entry);
 		cvs_ent_close(entlist, ENT_SYNC);
 	}
+	xfree(entry);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cvs.h,v 1.154 2008/02/04 18:23:58 tobias Exp $	*/
+/*	$OpenBSD: cvs.h,v 1.159 2008/02/10 10:10:15 joris Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -265,10 +265,11 @@ struct cvsroot {
 
 struct cvs_ent {
 	char		*ce_buf;
+	char		*ce_conflict;
 	char		*ce_name;
 	char		*ce_opts;
 	char		*ce_tag;
-	char		*ce_conflict;
+	time_t		*ce_date;
 	time_t		 ce_mtime;
 	u_int16_t	 ce_type;
 	u_int16_t	 ce_status;
@@ -288,6 +289,8 @@ typedef struct cvs_entries {
 	TAILQ_HEAD(, cvs_ent_line)	 cef_ent;
 } CVSENTRIES;
 
+extern char *checkout_target_dir;
+
 extern struct module_checkout *current_module;
 extern char *module_repo_root;
 
@@ -304,6 +307,7 @@ extern char *cvs_rsh;
 extern char *cvs_tmpdir;
 extern char *import_repository;
 extern char *cvs_server_path;
+extern time_t cvs_specified_date;
 extern char *cvs_specified_tag;
 extern char *cvs_directory_tag;
 
@@ -319,7 +323,8 @@ extern int  cvs_readonly;
 extern int  cvs_readonlyfs;
 extern int  cvs_error;
 extern int  cvs_server_active;
-extern int  reset_stickies;
+extern int  reset_option;
+extern int  reset_tag;
 extern int  kflag;
 
 extern struct cvs_cmd *cmdp;
@@ -373,6 +378,8 @@ void	 	cvs_ent_add(CVSENTRIES *, const char *);
 void	 	cvs_ent_remove(CVSENTRIES *, const char *);
 void	 	cvs_ent_close(CVSENTRIES *, int);
 void		cvs_ent_free(struct cvs_ent *);
+void		cvs_ent_line_str(const char *, char *, char *, char *, char *,
+		    int, int, char *, size_t);
 void		cvs_parse_tagfile(char *, char **, char **, int *);
 void		cvs_write_tagfile(const char *, char *, char *);
 

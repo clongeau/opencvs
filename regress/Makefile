@@ -1,21 +1,22 @@
-#	$OpenBSD: Makefile,v 1.15 2008/02/01 13:36:43 tobias Exp $
+#	$OpenBSD: Makefile,v 1.20 2008/02/09 12:20:33 tobias Exp $
 
 # Regression tests by Niall O'Higgins <niallo@openbsd.org> and
 # Tobias Stoeckmann <tobias@openbsd.org>.
 # Based on OpenRCS regression framework.
 
-CVS?=		opencvs
-DIFF=		diff -u
-
+CVS?=		opencvs -f
 MYCVSROOT?=	${.OBJDIR}/regress_cvs_root
 
 CLEANFILES=	regress_cvs_root regress_cvs_wcopy regress_cvs_stderr \
 		regress_cvs_stdout
 
+
 # These must be done in order.
 LTESTS= cvs-initial \
 	cvs-import-mflag \
+	cvs-checkout-dflag \
 	cvs-checkout-rflag-HEAD \
+	cvs-checkout-kflag-k-rflag-HEAD \
 	cvs-checkout-rflag-inval_branch_rev \
 	cvs-checkout-rflag-too_high \
 	cvs-checkout \
@@ -28,12 +29,16 @@ LTESTS= cvs-initial \
 	cvs-checkout \
 	cvs-tag-branch \
 	cvs-checkout-rflag_branch \
+	cvs-diff-file \
 	cvs-commit-to_branch \
 	cvs-annotate \
 	cvs-annotate-rflag-inval_branch_rev \
 	cvs-annotate-rflag-inval_branch_rev-fflag \
 	cvs-annotate-rflag-unknown_symbol-fflag \
-	cvs-checkout-rflag-1.1 \
+	cvs-checkout-kflag-kv-rflag-1.1 \
+	cvs-update-Aflag-kflag-kv \
+	cvs-update-Aflag-kflag-k-rflag-1.1 \
+	cvs-update-Aflag-rflag-1.1 \
 	cvs-update-Aflag \
 	cvs-status \
 	cvs-diff \
@@ -44,10 +49,7 @@ LTESTS= cvs-initial \
 	cvs-rtag-one_more_branch \
 	cvs-export
 # Known to fail.
-#	cvs-checkout-dflag
 #	cvs-update-for_subdir
-# Known to behave unconform to GNU cvs.
-#	cvs-diff-file
 
 tests:
 	@for t in ${LTESTS}; do \
@@ -103,6 +105,26 @@ test-cvs-checkout:
 	    ${CVS} -Q -d ${MYCVSROOT} co seed > /dev/null
 	@test -f ${.OBJDIR}/regress_cvs_wcopy/seed/seed1.txt
 
+test-cvs-checkout-kflag-k-rflag-HEAD:
+	@rm -rf ${.OBJDIR}/regress_cvs_wcopy
+	@mkdir ${.OBJDIR}/regress_cvs_wcopy
+	@cd ${.OBJDIR}/regress_cvs_wcopy; \
+	    ${CVS} -Q -d ${MYCVSROOT} co -rHEAD -kkv seed > /dev/null
+	@test -f ${.OBJDIR}/regress_cvs_wcopy/seed/seed1.txt;
+	@eval 'test `grep -c -e THEAD -e -kkv \
+	    ${.OBJDIR}/regress_cvs_wcopy/seed/CVS/Entries | wc -l` -eq 1'
+	@eval 'test `grep -c Id$ \
+	    ${.OBJDIR}/regress_cvs_wcopy/seed/seed1.txt | wc -l` -eq 1'
+
+test-cvs-checkout-kflag-kv-rflag-1.1:
+	@rm -rf ${.OBJDIR}/regress_cvs_wcopy
+	@mkdir ${.OBJDIR}/regress_cvs_wcopy
+	@cd ${.OBJDIR}/regress_cvs_wcopy; \
+	    ${CVS} -Q -d ${MYCVSROOT} co -r 1.1 -kkv seed > /dev/null
+	@test -f ${.OBJDIR}/regress_cvs_wcopy/seed/seed1.txt;
+	@eval 'test `grep -c -e T1.1 -e -kkv \
+	    ${.OBJDIR}/regress_cvs_wcopy/seed/CVS/Entries | wc -l` -eq 1'
+
 test-cvs-checkout-pflag:
 	@eval 'test `${CVS} -Q -d ${MYCVSROOT} checkout \
 	    -p seed/seed1.txt 2>/dev/null | wc -l` -eq 2'
@@ -136,7 +158,9 @@ test-cvs-checkout-rflag-HEAD:
 	@mkdir ${.OBJDIR}/regress_cvs_wcopy
 	@cd ${.OBJDIR}/regress_cvs_wcopy; \
 	    ${CVS} -Q -d ${MYCVSROOT} co -rHEAD seed > /dev/null
-	@test -f ${.OBJDIR}/regress_cvs_wcopy/seed/seed1.txt
+	@test -f ${.OBJDIR}/regress_cvs_wcopy/seed/seed1.txt;
+	@eval 'test `grep -c THEAD \
+	    ${.OBJDIR}/regress_cvs_wcopy/seed/CVS/Entries | wc -l` -eq 1'
 
 test-cvs-checkout-rflag-1.1:
 	@rm -rf ${.OBJDIR}/regress_cvs_wcopy
@@ -147,9 +171,11 @@ test-cvs-checkout-rflag-1.1:
 	    test -f ${.OBJDIR}/regress_cvs_wcopy/seed/seed2.txt
 
 test-cvs-checkout-dflag:
-	@${CVS} -Q -d ${MYCVSROOT} co -d \
-	    ${.OBJDIR}/regress_cvs_wcopy seed
-	@test -d ${.OBJDIR}/regress_cvs_wcopy
+	@rm -rf ${.OBJDIR}/regress_cvs_wcopy
+	@mkdir ${.OBJDIR}/regress_cvs_wcopy; \
+	    cd ${.OBJDIR}/regress_cvs_wcopy; \
+	    ${CVS} -Q -d ${MYCVSROOT} co -d seed2 seed > /dev/null
+	@test -d ${.OBJDIR}/regress_cvs_wcopy/seed2/CVS
 
 test-cvs-checkout-subdir:
 	@echo "test-cvs-checkout-subdir"
@@ -174,7 +200,6 @@ test-cvs-commit-Fflag:
 
 test-cvs-commit-to_branch:
 	@sleep 1
-	@echo "first branch line" >> ${.OBJDIR}/regress_cvs_wcopy/seed/seed1.txt
 	@cd ${.OBJDIR}/regress_cvs_wcopy/seed; ${CVS} commit \
 	    -m'first branch seed' > /dev/null
 	@eval 'test `cat ${.OBJDIR}/regress_cvs_root/seed/seed1.txt,v | wc -l` \
@@ -189,7 +214,10 @@ test-cvs-diff:
 	    eval 'test `${CVS} -Q diff | wc -l` -eq 9'
 
 test-cvs-diff-file:
-	@cd ${.OBJDIR}/regress_cvs_wcopy/seed; ${CVS} -Q diff seed1.txt
+	@sleep 1
+	@echo "first branch line" >> ${.OBJDIR}/regress_cvs_wcopy/seed/seed1.txt
+	@cd ${.OBJDIR}/regress_cvs_wcopy/seed; \
+	    eval 'test `${CVS} -Q diff seed1.txt | wc -l` -eq 7'
 
 test-cvs-export:
 	@rm -rf ${.OBJDIR}/regress_cvs_wcopy
@@ -243,13 +271,35 @@ test-cvs-rtag-one_more_branch:
 	@grep SECOND_BRANCH ${.OBJDIR}/regress_cvs_root/seed/seed2.txt,v \
 	    | grep 4 > /dev/null
 
-# XXX - Output is not GNU conform
 test-cvs-update-Aflag:
 	@cd ${.OBJDIR}/regress_cvs_wcopy/seed; \
 	    ${CVS} -Q update -A > /dev/null
-#	    eval 'test `${CVS} -q update -A | wc -l` -eq 1'
-	@eval 'test `grep -c T1 ${.OBJDIR}/regress_cvs_wcopy/seed/CVS/Entries` \
-	    -eq 0'
+	@eval 'test `grep -c -e T1 -e kkv \
+	    ${.OBJDIR}/regress_cvs_wcopy/seed/CVS/Entries` -eq 0'
+
+test-cvs-update-Aflag-kflag-kv:
+	@cd ${.OBJDIR}/regress_cvs_wcopy/seed; \
+	    ${CVS} -Q update -A -kv > /dev/null
+	@eval 'test `grep -c T1 \
+	    ${.OBJDIR}/regress_cvs_wcopy/seed/CVS/Entries` -eq 0'
+	@eval 'test `grep -c kv \
+	    ${.OBJDIR}/regress_cvs_wcopy/seed/CVS/Entries` -eq 2'
+
+test-cvs-update-Aflag-kflag-k-rflag-1.1:
+	@cd ${.OBJDIR}/regress_cvs_wcopy/seed; \
+	    ${CVS} -Q update -A -kk -r 1.1 > /dev/null
+	@eval 'test `grep -c T1 \
+	    ${.OBJDIR}/regress_cvs_wcopy/seed/CVS/Entries` -eq 2'
+	@eval 'test `grep -c kk \
+	    ${.OBJDIR}/regress_cvs_wcopy/seed/CVS/Entries` -eq 2'
+
+test-cvs-update-Aflag-rflag-1.1:
+	@cd ${.OBJDIR}/regress_cvs_wcopy/seed; \
+	    ${CVS} -Q update -A -r 1.1 > /dev/null
+	@eval 'test `grep -c T1 \
+	    ${.OBJDIR}/regress_cvs_wcopy/seed/CVS/Entries` -eq 2'
+	@eval 'test `grep -c kk \
+	    ${.OBJDIR}/regress_cvs_wcopy/seed/CVS/Entries` -eq 0'
 
 test-cvs-update-for_subdir:
 	@echo "test-cvs-update-for_subdir"

@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.132 2008/02/04 19:08:32 joris Exp $	*/
+/*	$OpenBSD: util.c,v 1.135 2008/02/09 20:04:00 xsa Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * Copyright (c) 2005, 2006 Joris Vink <joris@openbsd.org>
@@ -516,7 +516,6 @@ cvs_mkadmin(const char *path, const char *root, const char *repo,
     char *tag, char *date)
 {
 	FILE *fp;
-	struct stat st;
 	char buf[MAXPATHLEN];
 
 	if (cvs_server_active == 0)
@@ -525,9 +524,6 @@ cvs_mkadmin(const char *path, const char *root, const char *repo,
 		    (date != NULL) ? date : "");
 
 	(void)xsnprintf(buf, sizeof(buf), "%s/%s", path, CVS_PATH_CVSDIR);
-
-	if (stat(buf, &st) != -1)
-		return;
 
 	if (mkdir(buf, 0755) == -1 && errno != EEXIST)
 		fatal("cvs_mkadmin: %s: %s", buf, strerror(errno));
@@ -548,12 +544,6 @@ cvs_mkadmin(const char *path, const char *root, const char *repo,
 	fprintf(fp, "%s\n", repo);
 	(void)fclose(fp);
 
-	(void)xsnprintf(buf, sizeof(buf), "%s/%s", path, CVS_PATH_ENTRIES);
-
-	if ((fp = fopen(buf, "w")) == NULL)
-		fatal("cvs_mkadmin: %s: %s", buf, strerror(errno));
-	(void)fclose(fp);
-
 	cvs_write_tagfile(path, tag, date);
 }
 
@@ -563,7 +553,7 @@ cvs_mkpath(const char *path, char *tag)
 	CVSENTRIES *ent;
 	FILE *fp;
 	size_t len;
-	char entry[CVS_ENT_MAXLINELEN], sticky[CVS_REV_BUFSZ];
+	char *entry, sticky[CVS_REV_BUFSZ];
 	char *sp, *dp, *dir, *p, rpath[MAXPATHLEN], repo[MAXPATHLEN];
 
 	dir = xstrdup(path);
@@ -628,10 +618,16 @@ cvs_mkpath(const char *path, char *tag)
 		if (dp != NULL) {
 			if ((p = strchr(dp, '/')) != NULL)
 				*p = '\0';
+
+			entry = xmalloc(CVS_ENT_MAXLINELEN);
+			cvs_ent_line_str(dp, NULL, NULL, NULL, NULL, 1, 0,
+			    entry, CVS_ENT_MAXLINELEN);
+
 			ent = cvs_ent_open(rpath);
-			xsnprintf(entry, sizeof(entry), "D/%s////", dp);
 			cvs_ent_add(ent, entry);
 			cvs_ent_close(ent, ENT_SYNC);
+			xfree(entry);
+
 			if (p != NULL)
 				*p = '/';
 		}

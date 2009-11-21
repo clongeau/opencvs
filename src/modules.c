@@ -1,4 +1,4 @@
-/*	$OpenBSD: modules.c,v 1.7 2008/02/04 19:08:32 joris Exp $	*/
+/*	$OpenBSD: modules.c,v 1.10 2008/02/06 22:43:22 joris Exp $	*/
 /*
  * Copyright (c) 2008 Joris Vink <joris@openbsd.org>
  *
@@ -18,6 +18,7 @@
 #include <sys/param.h>
 #include <sys/resource.h>
 
+#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -39,16 +40,27 @@ cvs_parse_modules(void)
 }
 
 void
+cvs_modules_list(void)
+{
+	struct module_info *mi;
+
+	TAILQ_FOREACH(mi, &modules, m_list)
+		printf("%s\n", mi->mi_str);
+}
+
+void
 modules_parse_line(char *line, int lineno)
 {
 	int flags;
 	struct module_info *mi;
-	char *val, *p, *module, *sp, *dp;
+	char *bline, *val, *p, *module, *sp, *dp;
 	char *dirname, fpath[MAXPATHLEN], *prog;
+
+	bline = xstrdup(line);
 
 	flags = 0;
 	p = val = line;
-	while (*p != ' ' && *p != '\t' && *p != '\0')
+	while (!isspace(*p) && *p != '\0')
 		p++;
 
 	if (*p == '\0')
@@ -57,20 +69,20 @@ modules_parse_line(char *line, int lineno)
 	*(p++) = '\0';
 	module = val;
 
-	while ((*p == ' ' || *p == '\t') && *p != '\0')
+	while (isspace(*p))
 		p++;
 
 	if (*p == '\0')
 		goto bad;
 
 	val = p;
-	while (*p != ' ' && *p != '\t')
+	while (!isspace(*p) && *p != '\0')
 		p++;
 
 	prog = NULL;
 	while (val[0] == '-') {
 		p = val;
-		while (*p != ' ' && *p != '\t' && *p != '\0')
+		while (!isspace(*p) && *p != '\0')
 			p++;
 
 		if (*p == '\0')
@@ -96,6 +108,24 @@ modules_parse_line(char *line, int lineno)
 		case 'l':
 			flags |= MODULE_NORECURSE;
 			break;
+		case 'o':
+			if (flags != 0 || prog != NULL) {
+				cvs_log(LP_NOTICE,
+				    "-o cannot be used with other flags");
+				return;
+			}
+
+			val = p;
+			while (!isspace(*val) && *val != '\0')
+				val++;
+			if (*val == '\0')
+				goto bad;
+
+			*(val++) = '\0';
+			prog = xstrdup(p);
+			p = val;
+			flags |= MODULE_RUN_ON_CHECKOUT;
+			break;
 		case 'i':
 			if (flags != 0 || prog != NULL) {
 				cvs_log(LP_NOTICE,
@@ -111,6 +141,8 @@ modules_parse_line(char *line, int lineno)
 			p = val;
 			flags |= MODULE_RUN_ON_COMMIT;
 			break;
+		default:
+			goto bad;
 		}
 
 		val = p;
@@ -123,13 +155,16 @@ modules_parse_line(char *line, int lineno)
 	mi->mi_name = xstrdup(module);
 	mi->mi_flags = flags;
 	mi->mi_prog = prog;
+	mi->mi_str = bline;
 
 	dirname = NULL;
 	TAILQ_INIT(&(mi->mi_modules));
 	TAILQ_INIT(&(mi->mi_ignores));
-	for (sp = val; sp != NULL; sp = dp) {
-		dp = strchr(sp, ' ');
-		if (dp != NULL)
+	for (sp = val; *sp != '\0'; sp = dp) {
+		dp = sp;
+		while (!isspace(*dp) && *dp != '\0')
+			dp++;
+		if (*dp != '\0')
 			*(dp++) = '\0';
 
 		if (mi->mi_flags & MODULE_ALIAS) {

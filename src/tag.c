@@ -1,4 +1,4 @@
-/*	$OpenBSD: tag.c,v 1.64 2008/01/31 22:09:05 xsa Exp $	*/
+/*	$OpenBSD: tag.c,v 1.67 2008/02/09 13:03:29 joris Exp $	*/
 /*
  * Copyright (c) 2006 Xavier Santolaria <xsa@openbsd.org>
  *
@@ -67,7 +67,8 @@ cvs_tag(int argc, char **argv)
 
 	flags = CR_RECURSE_DIRS;
 
-	while ((ch = getopt(argc, argv, cvs_cmd_tag.cmd_opts)) != -1) {
+	while ((ch = getopt(argc, argv, cvs_cmdop == CVS_OP_TAG ?
+	    cvs_cmd_tag.cmd_opts : cvs_cmd_rtag.cmd_opts)) != -1) {
 		switch (ch) {
 		case 'b':
 			runflags |= T_BRANCH;
@@ -107,10 +108,11 @@ cvs_tag(int argc, char **argv)
 		if (argc < 2)
 			fatal("%s", cvs_cmd_rtag.cmd_synopsis);
 
-                for (i = 1; i < argc; i++)
-                        if (argv[i][0] == '/')
-                                fatal("Absolute path name is invalid: %s",
-                                    argv[i]);
+		for (i = 1; i < argc; i++) {
+			if (argv[i][0] == '/')
+				fatal("Absolute path name is invalid: %s",
+				    argv[i]);
+		}
         } else if (cvs_cmdop == CVS_OP_TAG && argc == 0)
 		fatal("%s", cvs_cmd_tag.cmd_synopsis);
 
@@ -316,7 +318,7 @@ tag_add(struct cvs_file *cf)
 			cvs_printf(" : NOT MOVING tag to version %s\n", revbuf);
 
 			return (-1);
-		} else if (runflags & T_FORCE_MOVE) {
+		} else {
 			sym = rcs_sym_get(cf->file_rcs, tag_name);
 			rcsnum_cpy(srev, sym->rs_num, 0);
 			cf->file_rcs->rf_flags &= ~RCS_SYNCED;

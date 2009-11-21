@@ -1,4 +1,4 @@
-/*	$OpenBSD: entries.c,v 1.88 2008/02/04 18:23:58 tobias Exp $	*/
+/*	$OpenBSD: entries.c,v 1.92 2008/02/10 10:21:42 joris Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -108,7 +108,7 @@ struct cvs_ent *
 cvs_ent_parse(const char *entry)
 {
 	int i;
-	struct tm t;
+	struct tm t, dt;
 	struct cvs_ent *ent;
 	char *fields[CVS_ENTRIES_NFIELDS], *buf, *sp, *dp;
 
@@ -138,6 +138,8 @@ cvs_ent_parse(const char *entry)
 	ent->ce_status = CVS_ENT_REG;
 	ent->ce_name = fields[1];
 	ent->ce_rev = NULL;
+	ent->ce_date = -1;
+	ent->ce_tag = NULL;
 
 	if (ent->ce_type == CVS_ENT_FILE) {
 		if (*fields[2] == '-') {
@@ -185,10 +187,25 @@ cvs_ent_parse(const char *entry)
 	else
 		ent->ce_opts = NULL;
 
-	if (strcmp(fields[5], ""))
-		ent->ce_tag = fields[5] + 1;
-	else
-		ent->ce_tag = NULL;
+	if (strcmp(fields[5], "")) {
+		switch(*fields[5]) {
+		case 'D':
+			if (sscanf(fields[5] + 1, "%d.%d.%d.%d.%d.%d",
+			    &dt.tm_year, &dt.tm_mon, &dt.tm_mday,
+			    &dt.tm_hour, &dt.tm_min, &dt.tm_sec) != 6)
+				fatal("wrong date specification");
+			dt.tm_year -= 1900;
+			dt.tm_mon -= 1;
+			ent->ce_date = timegm(&dt);
+			ent->ce_tag = NULL;
+			break;
+		case 'T':
+			ent->ce_tag = fields[5] + 1;
+			break;
+		default:
+			fatal("invalid sticky entry");
+		}
+	}
 
 	return (ent);
 }
@@ -318,6 +335,25 @@ cvs_ent_remove(CVSENTRIES *ep, const char *name)
 	xfree(l);
 }
 
+/*
+ * cvs_ent_line_str()
+ *
+ * Build CVS/Entries line.
+ *
+ */
+void
+cvs_ent_line_str(const char *name, char *rev, char *tstamp, char *opts,
+    char *sticky, int isdir, int isremoved, char *buf, size_t len)
+{
+	if (isdir == 1) {
+		(void)xsnprintf(buf, len, "D/%s////", name);
+		return;
+	}
+
+	(void)xsnprintf(buf, len, "/%s/%s%s/%s/%s/%s",
+	    name, isremoved == 1 ? "-" : "", rev, tstamp, opts, sticky);
+}
+
 void
 cvs_ent_free(struct cvs_ent *ent)
 {
@@ -361,6 +397,7 @@ cvs_parse_tagfile(char *dir, char **tagp, char **datep, int *nbp)
 	FILE *fp;
 	int i, linenum;
 	size_t len;
+	struct tm datetm;
 	char linebuf[128], tagpath[MAXPATHLEN];
 
 	if (tagp != NULL)
@@ -402,6 +439,17 @@ cvs_parse_tagfile(char *dir, char **tagp, char **datep, int *nbp)
 				*tagp = xstrdup(linebuf + 1);
 			break;
 		case 'D':
+			if (sscanf(linebuf + 1, "%d.%d.%d.%d.%d.%d",
+			    &datetm.tm_year, &datetm.tm_mon, &datetm.tm_mday,
+			    &datetm.tm_hour, &datetm.tm_min, &datetm.tm_sec) !=
+			    6)
+				fatal("wrong date specification");
+			datetm.tm_year -= 1900;
+			datetm.tm_mon -= 1;
+
+			if (cvs_specified_date == -1)
+				cvs_specified_date = timegm(&datetm);
+
 			if (datep != NULL)
 				*datep = xstrdup(linebuf + 1);
 			break;
@@ -428,6 +476,7 @@ cvs_write_tagfile(const char *dir, char *tag, char *date)
 	RCSNUM *rev;
 	char tagpath[MAXPATHLEN];
 	char sticky[CVS_REV_BUFSZ];
+	struct tm *datetm;
 	int i;
 
 	cvs_log(LP_TRACE, "cvs_write_tagfile(%s, %s, %s)", dir,
@@ -440,7 +489,7 @@ cvs_write_tagfile(const char *dir, char *tag, char *date)
 	if (i < 0 || i >= MAXPATHLEN)
 		return;
 
-	if ((tag != NULL) || (date != NULL)) {
+	if (tag != NULL || cvs_specified_date != -1) {
 		if ((fp = fopen(tagpath, "w+")) == NULL) {
 			if (errno != ENOENT) {
 				cvs_log(LP_NOTICE, "failed to open `%s' : %s",
@@ -459,7 +508,9 @@ cvs_write_tagfile(const char *dir, char *tag, char *date)
 				    "T%s", tag);
 			}
 		} else {
-			(void)xsnprintf(sticky, sizeof(sticky), "D%s", date);
+			datetm = gmtime(&cvs_specified_date);
+			strftime(sticky, sizeof(sticky), "D%Y.%m.%d.%H.%M.%S",
+			    datetm);
 		}
 
 		if (cvs_server_active == 1)

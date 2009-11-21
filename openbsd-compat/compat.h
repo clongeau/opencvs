@@ -26,6 +26,7 @@
 #include <stdint.h>
 #endif
 
+/* XXX */
 #ifndef MAXBSIZE
 #define MAXBSIZE 4096
 #endif

@@ -1,4 +1,4 @@
-/*	$OpenBSD: remote.c,v 1.22 2008/03/08 11:53:36 joris Exp $	*/
+/*	$OpenBSD: remote.c,v 1.24 2008/06/14 03:19:15 joris Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -210,6 +210,36 @@ cvs_remote_send_file(const char *path, int _fd)
 }
 
 void
+cvs_remote_send_file_buf(char *file, BUF *bp, mode_t mode)
+{
+	char buf[18];
+	u_char *data;
+	size_t len, ret;
+
+	if (cvs_server_active != 1)
+		fatal("cvs_remote_send_file_buf is server only");
+
+	len = cvs_buf_len(bp);
+	data = cvs_buf_release(bp);
+
+	cvs_modetostr(mode, buf, sizeof(buf));
+	cvs_remote_output(buf);
+
+	(void)xsnprintf(buf, sizeof(buf), "%ld", len);
+	cvs_remote_output(buf);
+
+	ret = fwrite(data, sizeof(char), len, stdout);
+	if (ret != len)
+		cvs_log(LP_ERR, "warning: sent %s truncated", file);
+
+	if (cvs_server_active == 0 && cvs_client_inlog_fd != -1 &&
+	    atomicio(vwrite, cvs_client_inlog_fd, data, len) != len)
+		fatal("failed to write to log file");
+
+	xfree(data);
+}
+
+void
 cvs_remote_classify_file(struct cvs_file *cf)
 {
 	struct stat st;
@@ -217,7 +247,6 @@ cvs_remote_classify_file(struct cvs_file *cf)
 
 	entlist = cvs_ent_open(cf->file_wd);
 	cf->file_ent = cvs_ent_get(entlist, cf->file_name);
-	cvs_ent_close(entlist, ENT_NOSYNC);
 
 	if (cf->file_ent != NULL && cf->file_ent->ce_status != CVS_ENT_REG) {
 		if (cf->file_ent->ce_status == CVS_ENT_ADDED)

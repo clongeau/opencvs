@@ -1,4 +1,4 @@
-/*	$OpenBSD: file.c,v 1.234 2008/03/09 03:14:52 joris Exp $	*/
+/*	$OpenBSD: file.c,v 1.249 2008/06/15 04:38:52 tobias Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
@@ -47,6 +47,7 @@
 #define CVS_CHAR_ISMETA(c)	((c == '*') || (c == '?') || (c == '['))
 
 extern int print_stdout;
+extern int build_dirs;
 
 /*
  * Standard patterns to ignore.
@@ -218,15 +219,13 @@ cvs_file_get(const char *name, int user_supplied, struct cvs_flisthead *fl)
 }
 
 struct cvs_file *
-cvs_file_get_cf(const char *d, const char *f, int fd,
+cvs_file_get_cf(const char *d, const char *f, const char *fpath, int fd,
 	int type, int user_supplied)
 {
+	const char *p;
 	struct cvs_file *cf;
-	char *p, rpath[MAXPATHLEN];
 
-	(void)xsnprintf(rpath, MAXPATHLEN, "%s/%s", d, f);
-
-	for (p = rpath; p[0] == '.' && p[1] == '/';)
+	for (p = fpath; p[0] == '.' && p[1] == '/';)
 		p += 2;
 
 	cf = (struct cvs_file *)xcalloc(1, sizeof(*cf));
@@ -300,7 +299,8 @@ cvs_file_walklist(struct cvs_flisthead *fl, struct cvs_recursion *cr)
 			 * During checkout -p, do not use any locally
 			 * available directories.
 			 */
-			if (cvs_cmdop != CVS_OP_CHECKOUT || !print_stdout)
+			if ((cmdp->cmd_flags & CVS_USE_WDIR) &&
+			    (cvs_cmdop != CVS_OP_CHECKOUT || !print_stdout))
 				if (stat(d, &st) == -1) {
 					cvs_log(LP_ERRNO, "%s", d);
 					goto next;
@@ -338,7 +338,8 @@ cvs_file_walklist(struct cvs_flisthead *fl, struct cvs_recursion *cr)
 			}
 		}
 
-		cf = cvs_file_get_cf(d, f, fd, type, l->user_supplied);
+		cf = cvs_file_get_cf(d, f, l->file_path,
+		    fd, type, l->user_supplied);
 		if (cf->file_type == CVS_DIR) {
 			cvs_file_walkdir(cf, cr);
 		} else {
@@ -348,7 +349,8 @@ cvs_file_walklist(struct cvs_flisthead *fl, struct cvs_recursion *cr)
 
 				if (cvs_directory_tag == NULL &&
 				    cvs_specified_tag != NULL)
-					cvs_directory_tag = cvs_specified_tag;
+					cvs_directory_tag =
+					    xstrdup(cvs_specified_tag);
 
 				if (current_cvsroot->cr_method ==
 				    CVS_METHOD_LOCAL) {
@@ -362,8 +364,14 @@ cvs_file_walklist(struct cvs_flisthead *fl, struct cvs_recursion *cr)
 			if (cr->fileproc != NULL)
 				cr->fileproc(cf);
 
-			if (l->user_supplied && cmdp->cmd_flags & CVS_LOCK_REPO)
-				cvs_repository_unlock(repo);
+			if (l->user_supplied) {
+				if (cmdp->cmd_flags & CVS_LOCK_REPO)
+					cvs_repository_unlock(repo);
+				if (cvs_directory_tag != NULL) {
+					xfree(cvs_directory_tag);
+					cvs_directory_tag = NULL;
+				}
+			}
 		}
 
 		cvs_file_free(cf);
@@ -579,8 +587,6 @@ cvs_file_walkdir(struct cvs_file *cf, struct cvs_recursion *cr)
 		cvs_ent_free(ent);
 	}
 
-	cvs_ent_close(entlist, ENT_NOSYNC);
-
 walkrepo:
 	if (current_cvsroot->cr_method == CVS_METHOD_LOCAL) {
 		cvs_get_repository_path(cf->file_path, repo, MAXPATHLEN);
@@ -591,7 +597,7 @@ walkrepo:
 		xsnprintf(fpath, sizeof(fpath), "%s/%s", cf->file_path,
 		    CVS_PATH_STATICENTRIES);
 
-		if (stat(fpath, &st) == -1)
+		if (stat(fpath, &st) == -1 || build_dirs == 1)
 			cvs_repository_getdir(repo, cf->file_path, &fl, &dl,
 			    (cr->flags & CR_RECURSE_DIRS));
 	}
@@ -603,17 +609,17 @@ walkrepo:
 	    (cmdp->cmd_flags & CVS_LOCK_REPO))
 		cvs_repository_unlock(repo);
 
-	cvs_file_walklist(&dl, cr);
-	cvs_file_freelist(&dl);
-
-	if (cr->leavedir != NULL)
-		cr->leavedir(cf);
-
 	if (cvs_directory_tag != NULL && cmdp->cmd_flags & CVS_USE_WDIR) {
 		cvs_write_tagfile(cf->file_path, cvs_directory_tag, NULL);
 		xfree(cvs_directory_tag);
 		cvs_directory_tag = NULL;
 	}
+
+	cvs_file_walklist(&dl, cr);
+	cvs_file_freelist(&dl);
+
+	if (cr->leavedir != NULL)
+		cr->leavedir(cf);
 }
 
 void
@@ -639,7 +645,6 @@ cvs_file_classify(struct cvs_file *cf, const char *tag)
 	CVSENTRIES *entlist = NULL;
 	const char *state;
 	char repo[MAXPATHLEN], rcsfile[MAXPATHLEN];
-	char r1[CVS_REV_BUFSZ], r2[CVS_REV_BUFSZ];
 
 	cvs_log(LP_TRACE, "cvs_file_classify(%s, %s)", cf->file_path,
 	    (tag != NULL) ? tag : "none");
@@ -664,16 +669,15 @@ cvs_file_classify(struct cvs_file *cf, const char *tag)
 	if (cmdp->cmd_flags & CVS_USE_WDIR) {
 		entlist = cvs_ent_open(cf->file_wd);
 		cf->file_ent = cvs_ent_get(entlist, cf->file_name);
-		cvs_ent_close(entlist, ENT_NOSYNC);
 	} else
 		cf->file_ent = NULL;
 
 	if (cf->file_ent != NULL) {
-		if (cf->file_ent->ce_type == CVS_ENT_DIR &&
+		if (cf->fd != -1 && cf->file_ent->ce_type == CVS_ENT_DIR &&
 		    cf->file_type != CVS_DIR)
 			fatal("%s is supposed to be a directory, but it is not",
 			    cf->file_path);
-		if (cf->file_ent->ce_type == CVS_ENT_FILE &&
+		if (cf->fd != -1 && cf->file_ent->ce_type == CVS_ENT_FILE &&
 		    cf->file_type != CVS_FILE)
 			fatal("%s is supposed to be a file, but it is not",
 			    cf->file_path);
@@ -701,6 +705,7 @@ cvs_file_classify(struct cvs_file *cf, const char *tag)
 	case CVS_OP_COMMIT:
 		rflags = RCS_WRITE;
 		break;
+	case CVS_OP_ADMIN:
 	case CVS_OP_IMPORT:
 	case CVS_OP_LOG:
 	case CVS_OP_RLOG:
@@ -738,9 +743,7 @@ cvs_file_classify(struct cvs_file *cf, const char *tag)
 	cf->file_flags |= FILE_HAS_TAG;
 	if (tag != NULL && cf->file_rcs != NULL) {
 		if ((cf->file_rcsrev = rcs_translate_tag(tag, cf->file_rcs))
-		    != NULL) {
-			rcsnum_tostr(cf->file_rcsrev, r1, sizeof(r1));
-		} else {
+		    == NULL) {
 			cf->file_rcsrev = rcs_translate_tag(NULL, cf->file_rcs);
 			if (cf->file_rcsrev != NULL) {
 				notag = 1;
@@ -755,11 +758,6 @@ cvs_file_classify(struct cvs_file *cf, const char *tag)
 	} else {
 		cf->file_rcsrev = NULL;
 	}
-
-	if (cf->file_ent != NULL)
-		rcsnum_tostr(cf->file_ent->ce_rev, r1, sizeof(r1));
-	if (cf->file_rcsrev != NULL)
-		rcsnum_tostr(cf->file_rcsrev, r2, sizeof(r2));
 
 	ismodified = rcsdead = 0;
 	if (cf->fd != -1 && cf->file_ent != NULL) {
@@ -800,7 +798,8 @@ cvs_file_classify(struct cvs_file *cf, const char *tag)
 		if (!strcmp(state, RCS_STATE_DEAD))
 			rcsdead = 1;
 
-		if (cvs_specified_date == -1 && tag == NULL && cf->in_attic &&
+		if (cvs_specified_date == -1 && cvs_directory_date == -1 &&
+		    tag == NULL && cf->in_attic &&
 		    !RCSNUM_ISBRANCHREV(cf->file_rcsrev))
 			rcsdead = 1;
 
@@ -821,7 +820,7 @@ cvs_file_classify(struct cvs_file *cf, const char *tag)
 			}
 
 			cf->file_status = FILE_UNKNOWN;
-		} else if (rcsdead == 1) {
+		} else if (rcsdead == 1 || !(cf->file_flags & FILE_HAS_TAG)) {
 			if (cf->fd == -1) {
 				cf->file_status = FILE_UPTODATE;
 			} else if (cvs_cmdop != CVS_OP_ADD) {
@@ -845,7 +844,8 @@ cvs_file_classify(struct cvs_file *cf, const char *tag)
 				    cf->file_path);
 			}
 			cf->file_status = FILE_REMOVE_ENTRY;
-		} else if (cf->file_rcs == NULL || rcsdead == 1) {
+		} else if (cf->file_rcs == NULL || rcsdead == 1 ||
+		    !(cf->file_flags & FILE_HAS_TAG)) {
 			cf->file_status = FILE_ADDED;
 		} else {
 			cvs_log(LP_NOTICE,
@@ -863,7 +863,8 @@ cvs_file_classify(struct cvs_file *cf, const char *tag)
 		} else if (cf->file_rcs == NULL || rcsdead == 1) {
 			cf->file_status = FILE_REMOVE_ENTRY;
 		} else {
-			if (strcmp(r1, r2)) {
+			if (rcsnum_differ(cf->file_ent->ce_rev,
+			    cf->file_rcsrev) && cvs_cmdop != CVS_OP_ADD) {
 				cvs_log(LP_NOTICE,
 				    "conflict: removed %s was modified"
 				    " by a second party",
@@ -881,8 +882,7 @@ cvs_file_classify(struct cvs_file *cf, const char *tag)
 			if (cf->fd == -1 && server_has_file == 0) {
 				cvs_log(LP_NOTICE,
 				    "warning: %s's entry exists but"
-				    " there is no longer a file"
-				    " in the repository,"
+				    " is no longer in the repository,"
 				    " removing entry",
 				     cf->file_path);
 				cf->file_status = FILE_REMOVE_ENTRY;
@@ -893,7 +893,10 @@ cvs_file_classify(struct cvs_file *cf, const char *tag)
 					    "in the repository but is "
 					    "locally modified",
 					    cf->file_path);
-					cf->file_status = FILE_CONFLICT;
+					if (cvs_cmdop == CVS_OP_COMMIT)
+						cf->file_status = FILE_UNLINK;
+					else
+						cf->file_status = FILE_CONFLICT;
 				} else if (cvs_cmdop != CVS_OP_IMPORT) {
 					cvs_log(LP_NOTICE,
 					    "%s is no longer in the "
@@ -905,7 +908,7 @@ cvs_file_classify(struct cvs_file *cf, const char *tag)
 			}
 		} else if (cf->file_rcsrev == NULL) {
 			cf->file_status = FILE_UNLINK;
-		} else{
+		} else {
 			if (cf->fd == -1 && server_has_file == 0) {
 				if (cvs_cmdop != CVS_OP_REMOVE) {
 					cvs_log(LP_NOTICE,
@@ -913,19 +916,20 @@ cvs_file_classify(struct cvs_file *cf, const char *tag)
 					    cf->file_path);
 				}
 				cf->file_status = FILE_LOST;
-			} else if (cf->file_rcsrev == NULL) {
-				cf->file_status = FILE_UNLINK;
 			} else {
 				if (ismodified == 1)
 					cf->file_status = FILE_MODIFIED;
 				else
 					cf->file_status = FILE_UPTODATE;
-
-				if (strcmp(r1, r2)) {
+				if (rcsnum_differ(cf->file_ent->ce_rev,
+				    cf->file_rcsrev)) {
 					if (cf->file_status == FILE_MODIFIED)
 						cf->file_status = FILE_MERGE;
 					else
 						cf->file_status = FILE_PATCH;
+				} else if (cf->file_ent->ce_conflict != NULL &&
+				    cf->file_status != FILE_MODIFIED) {
+					cf->file_status = FILE_CONFLICT;
 				}
 			}
 		}

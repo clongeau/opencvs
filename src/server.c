@@ -1,4 +1,4 @@
-/*	$OpenBSD: server.c,v 1.84 2008/02/11 20:33:11 tobias Exp $	*/
+/*	$OpenBSD: server.c,v 1.91 2008/06/14 03:19:15 joris Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -72,8 +72,10 @@ int	cvs_server(int, char **);
 char	*cvs_server_path = NULL;
 
 static char *server_currentdir = NULL;
-static char *server_argv[CVS_CMD_MAXARG];
+static char **server_argv;
 static int server_argc = 1;
+
+extern int disable_fast_checkout;
 
 struct cvs_cmd cvs_cmd_server = {
 	CVS_OP_SERVER, CVS_USE_WDIR, "server", { "", "" },
@@ -102,6 +104,7 @@ cvs_server(int argc, char **argv)
 
 	cvs_server_active = 1;
 
+	server_argv = xcalloc(server_argc + 1, sizeof(*server_argv));
 	server_argv[0] = xstrdup("server");
 
 	(void)xasprintf(&cvs_server_path, "%s/cvs-serv%d", cvs_tmpdir,
@@ -142,13 +145,15 @@ cvs_server(int argc, char **argv)
 void
 cvs_server_send_response(char *fmt, ...)
 {
+	int i;
 	va_list ap;
 	char *data;
 
 	va_start(ap, fmt);
-	if (vasprintf(&data, fmt, ap) == -1)
-		fatal("vasprintf: %s", strerror(errno));
+	i = vasprintf(&data, fmt, ap);
 	va_end(ap);
+	if (i == -1)
+		fatal("cvs_server_send_response: could not allocate memory");
 
 	cvs_log(LP_TRACE, "%s", data);
 	cvs_remote_output(data);
@@ -218,12 +223,11 @@ cvs_server_validreq(char *data)
 			continue;
 
 		if (first != 0)
-			cvs_buf_append(bp, " ", 1);
+			cvs_buf_putc(bp, ' ');
 		else
 			first++;
 
-		cvs_buf_append(bp, cvs_requests[i].name,
-		    strlen(cvs_requests[i].name));
+		cvs_buf_puts(bp, cvs_requests[i].name);
 	}
 
 	cvs_buf_putc(bp, '\0');
@@ -357,7 +361,6 @@ cvs_server_directory(char *data)
 
 		entlist = cvs_ent_open(parent);
 		cvs_ent_add(entlist, entry);
-		cvs_ent_close(entlist, ENT_SYNC);
 		xfree(entry);
 	}
 
@@ -378,7 +381,6 @@ cvs_server_entry(char *data)
 
 	entlist = cvs_ent_open(server_currentdir);
 	cvs_ent_add(entlist, data);
-	cvs_ent_close(entlist, ENT_SYNC);
 }
 
 void
@@ -392,6 +394,9 @@ cvs_server_modified(char *data)
 
 	if (data == NULL)
 		fatal("Missing argument for Modified");
+
+	/* sorry, we have to use TMP_DIR */
+	disable_fast_checkout = 1;
 
 	mode = cvs_remote_input();
 	len = cvs_remote_input();
@@ -434,6 +439,9 @@ cvs_server_unchanged(char *data)
 	if (data == NULL)
 		fatal("Missing argument for Unchanged");
 
+	/* sorry, we have to use TMP_DIR */
+	disable_fast_checkout = 1;
+
 	(void)xsnprintf(fpath, MAXPATHLEN, "%s/%s", server_currentdir, data);
 
 	entlist = cvs_ent_open(server_currentdir);
@@ -452,24 +460,25 @@ cvs_server_unchanged(char *data)
 
 	cvs_ent_free(ent);
 	cvs_ent_add(entlist, entry);
-	cvs_ent_close(entlist, ENT_SYNC);
 }
 
 void
 cvs_server_questionable(char *data)
 {
+	/* sorry, we have to use TMP_DIR */
+	disable_fast_checkout = 1;
 }
 
 void
 cvs_server_argument(char *data)
 {
-	if (server_argc >= CVS_CMD_MAXARG)
-		fatal("cvs_server_argument: too many arguments sent");
-
 	if (data == NULL)
 		fatal("Missing argument for Argument");
 
-	server_argv[server_argc++] = xstrdup(data);
+	server_argv = xrealloc(server_argv, server_argc + 2,
+	    sizeof(*server_argv));
+	server_argv[server_argc] = xstrdup(data);
+	server_argv[++server_argc] = NULL;
 }
 
 void
@@ -478,7 +487,7 @@ cvs_server_argumentx(char *data)
 	int idx;
 	size_t len;
 
-	if (server_argc < 0)
+	if (server_argc == 1)
 		fatal("Protocol Error: ArgumentX without previous argument");
 
 	idx = server_argc - 1;
@@ -617,7 +626,7 @@ cvs_server_export(char *data)
 
 	cvs_cmdop = CVS_OP_EXPORT;
 	cmdp->cmd_flags = cvs_cmd_export.cmd_flags;
-	cvs_checkout(server_argc, server_argv);
+	cvs_export(server_argc, server_argv);
 	cvs_server_send_response("ok");
 }
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: admin.c,v 1.57 2008/03/09 03:14:52 joris Exp $	*/
+/*	$OpenBSD: admin.c,v 1.63 2008/06/20 16:32:06 tobias Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * Copyright (c) 2005 Joris Vink <joris@openbsd.org>
@@ -88,7 +88,7 @@ cvs_admin(int argc, char **argv)
 			kflag = rcs_kflag_get(koptstr);
 			if (RCS_KWEXP_INVAL(kflag)) {
 				cvs_log(LP_ERR,
-				    "invalid RCS keyword expension mode");
+				    "invalid RCS keyword expansion mode");
 				fatal("%s", cvs_cmd_admin.cmd_synopsis);
 			}
 			break;
@@ -213,11 +213,16 @@ cvs_admin_local(struct cvs_file *cf)
 		return;
 	}
 
-	if (cf->file_status == FILE_UNKNOWN)
+	if (cf->file_ent == NULL)
 		return;
 	else if (cf->file_status == FILE_ADDED) {
 		cvs_log(LP_ERR, "cannot admin newly added file `%s'",
 		    cf->file_name);
+		return;
+	}
+
+	if (cf->file_rcs == NULL) {
+		cvs_log(LP_ERR, "lost RCS file for `%s'", cf->file_path);
 		return;
 	}
 
@@ -248,7 +253,7 @@ cvs_admin_local(struct cvs_file *cf)
 			    strerror(errno));
 
 		/* XXX: S_ISREG() check instead of blindly using CVS_FILE? */
-		ocf = cvs_file_get_cf(d, f, ofd, CVS_FILE, 0);
+		ocf = cvs_file_get_cf(d, f, oldfilename, ofd, CVS_FILE, 0);
 
 		ocf->file_rcs = rcs_open(fpath, ofd, RCS_READ, 0444);
 		if (ocf->file_rcs == NULL)
@@ -256,8 +261,6 @@ cvs_admin_local(struct cvs_file *cf)
 
 		TAILQ_FOREACH(acp, &(ocf->file_rcs->rf_access), ra_list)
 			rcs_access_add(cf->file_rcs, acp->ra_name);
-
-		(void)close(ofd);
 
 		cvs_file_free(ocf);
 	}
@@ -360,10 +363,14 @@ cvs_admin_local(struct cvs_file *cf)
 				xfree(state);
 				return;
 			}
-		} else {
+		} else if (cf->file_rcs->rf_head != NULL) {
 			state = xstrdup(statestr);
 			logrev = rcsnum_alloc();
 			rcsnum_cpy(cf->file_rcs->rf_head, logrev, 0);
+		} else {
+			cvs_log(LP_ERR, "head revision missing");
+			cvs_argv_destroy(sargv);
+			return;
 		}
 
 		if (rcs_state_check(state) < 0) {

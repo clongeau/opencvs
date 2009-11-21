@@ -1,4 +1,4 @@
-/*	$OpenBSD: checkout.c,v 1.143 2008/03/09 03:14:52 joris Exp $	*/
+/*	$OpenBSD: checkout.c,v 1.155 2008/06/14 04:34:08 tobias Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -24,6 +24,7 @@
 #include <libgen.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "cvs.h"
@@ -47,7 +48,10 @@ static char *dateflag = NULL;
 static int nflag = 0;
 
 char *checkout_target_dir = NULL;
+
 time_t cvs_specified_date = -1;
+time_t cvs_directory_date = -1;
+int disable_fast_checkout = 0;
 
 struct cvs_cmd cvs_cmd_checkout = {
 	CVS_OP_CHECKOUT, CVS_USE_WDIR, "checkout",
@@ -90,12 +94,16 @@ cvs_checkout(int argc, char **argv)
 		case 'D':
 			dateflag = optarg;
 			cvs_specified_date = cvs_date_parse(dateflag);
+			reset_tag = 0;
 			break;
 		case 'd':
 			if (dflag != NULL)
 				fatal("-d specified two or more times");
 			dflag = optarg;
 			checkout_target_dir = dflag;
+
+			if (cvs_server_active == 1)
+				disable_fast_checkout = 1;
 			break;
 		case 'j':
 			if (cvs_join_rev1 == NULL)
@@ -111,7 +119,7 @@ cvs_checkout(int argc, char **argv)
 			kflag = rcs_kflag_get(koptstr);
 			if (RCS_KWEXP_INVAL(kflag)) {
 				cvs_log(LP_ERR,
-				    "invalid RCS keyword expension mode");
+				    "invalid RCS keyword expansion mode");
 				fatal("%s", cvs_cmd_add.cmd_synopsis);
 			}
 			break;
@@ -150,7 +158,15 @@ cvs_checkout(int argc, char **argv)
 	if (argc == 0)
 		fatal("%s", cvs_cmd_checkout.cmd_synopsis);
 
+	if (cvs_server_active == 1 && disable_fast_checkout != 1) {
+		cmdp->cmd_flags &= ~CVS_USE_WDIR;
+		cvs_noexec = 1;
+	}
+
 	checkout_check_repository(argc, argv);
+
+	if (cvs_server_active == 1 && disable_fast_checkout != 1)
+		cvs_noexec = 0;
 
 	return (0);
 }
@@ -169,7 +185,7 @@ cvs_export(int argc, char **argv)
 			kflag = rcs_kflag_get(koptstr);
 			if (RCS_KWEXP_INVAL(kflag)) {
 				cvs_log(LP_ERR,
-				    "invalid RCS keyword expension mode");
+				    "invalid RCS keyword expansion mode");
 				fatal("%s", cvs_cmd_add.cmd_synopsis);
 			}
 			break;
@@ -268,8 +284,6 @@ checkout_check_repository(int argc, char **argv)
 		return;
 	}
 
-	cvs_directory_tag = cvs_specified_tag;
-
 	for (i = 0; i < argc; i++) {
 		mc = cvs_module_lookup(argv[i]);
 		current_module = mc;
@@ -331,7 +345,7 @@ checkout_check_repository(int argc, char **argv)
 
 			if (nflag != 1 && mc->mc_prog != NULL &&
 			    mc->mc_flags & MODULE_RUN_ON_CHECKOUT)
-				cvs_exec(mc->mc_prog);
+				cvs_exec(mc->mc_prog, NULL, 0);
 
 			if (module_repo_root != NULL)
 				xfree(module_repo_root);
@@ -410,7 +424,14 @@ checkout_repository(const char *repobase, const char *wdbase)
 		cr.leavedir = NULL;
 	} else {
 		cr.enterdir = cvs_update_enterdir;
-		cr.leavedir = prune_dirs ? cvs_update_leavedir : NULL;
+		if (cvs_server_active == 1) {
+			if (disable_fast_checkout != 1)
+				cr.leavedir = NULL;
+			else
+				cr.leavedir = cvs_update_leavedir;
+		} else {
+			cr.leavedir = prune_dirs ? cvs_update_leavedir : NULL;
+		}
 	}
 	cr.fileproc = cvs_update_local;
 	cr.flags = flags;
@@ -431,13 +452,14 @@ checkout_repository(const char *repobase, const char *wdbase)
 void
 cvs_checkout_file(struct cvs_file *cf, RCSNUM *rnum, char *tag, int co_flags)
 {
+	BUF *bp;
+	mode_t mode;
 	int cf_kflag, exists, fd;
 	time_t rcstime;
 	CVSENTRIES *ent;
 	struct timeval tv[2];
-	struct tm *datetm;
-	char *tosend;
-	char template[MAXPATHLEN], *entry;
+	struct tm datetm;
+	char *entry, *tosend;
 	char kbuf[8], sticky[CVS_REV_BUFSZ], rev[CVS_REV_BUFSZ];
 	char timebuf[CVS_TIME_BUFSZ], tbuf[CVS_TIME_BUFSZ];
 
@@ -446,6 +468,8 @@ cvs_checkout_file(struct cvs_file *cf, RCSNUM *rnum, char *tag, int co_flags)
 
 	if (!(co_flags & CO_REMOVE))
 		rcsnum_tostr(rnum, rev, sizeof(rev));
+	else
+		rev[0] = '\0';
 
 	cvs_log(LP_TRACE, "cvs_checkout_file(%s, %s, %d) -> %s",
 	    cf->file_path, rev, co_flags,
@@ -476,7 +500,10 @@ cvs_checkout_file(struct cvs_file *cf, RCSNUM *rnum, char *tag, int co_flags)
 			cvs_merge_file(cf, (cvs_join_rev1 == NULL));
 		}
 
-		if (fchmod(cf->fd, 0644) == -1)
+		mode = cf->file_rcs->rf_mode;
+		mode |= S_IWUSR;
+
+		if (fchmod(cf->fd, mode) == -1)
 			fatal("cvs_checkout_file: fchmod: %s", strerror(errno));
 
 		if ((exists == 0) && (cf->file_ent == NULL) &&
@@ -499,7 +526,8 @@ cvs_checkout_file(struct cvs_file *cf, RCSNUM *rnum, char *tag, int co_flags)
 		time(&rcstime);
 	}
 
-	asctime_r(gmtime(&rcstime), tbuf);
+	gmtime_r(&rcstime, &datetm);
+	asctime_r(&datetm, tbuf);
 	tbuf[strcspn(tbuf, "\n")] = '\0';
 
 	if (co_flags & CO_MERGE) {
@@ -509,17 +537,22 @@ cvs_checkout_file(struct cvs_file *cf, RCSNUM *rnum, char *tag, int co_flags)
 		strlcpy(timebuf, tbuf, sizeof(timebuf));
 	}
 
-	if (co_flags & CO_SETSTICKY)
+	if (reset_tag) {
+		sticky[0] = '\0';
+	} else if (co_flags & CO_SETSTICKY)
 		if (tag != NULL)
 			(void)xsnprintf(sticky, sizeof(sticky), "T%s", tag);
 		else if (cvs_specified_date != -1) {
-			datetm = gmtime(&cvs_specified_date);
+			gmtime_r(&cvs_specified_date, &datetm);
 			(void)strftime(sticky, sizeof(sticky),
-			    "D"CVS_DATE_FMT, datetm);
+			    "D"CVS_DATE_FMT, &datetm);
+		} else if (cvs_directory_date != -1) {
+			gmtime_r(&cvs_directory_date, &datetm);
+			(void)strftime(sticky, sizeof(sticky),
+			    "D"CVS_DATE_FMT, &datetm);
 		} else
 			(void)xsnprintf(sticky, sizeof(sticky), "T%s", rev);
-	else if (!reset_tag && cf->file_ent != NULL &&
-	    cf->file_ent->ce_tag != NULL)
+	else if (cf->file_ent != NULL && cf->file_ent->ce_tag != NULL)
 		(void)xsnprintf(sticky, sizeof(sticky), "T%s",
 		    cf->file_ent->ce_tag);
 	else
@@ -544,9 +577,7 @@ cvs_checkout_file(struct cvs_file *cf, RCSNUM *rnum, char *tag, int co_flags)
 		if (!(co_flags & CO_REMOVE) && cvs_cmdop != CVS_OP_EXPORT) {
 			ent = cvs_ent_open(cf->file_wd);
 			cvs_ent_add(ent, entry);
-			cvs_ent_close(ent, ENT_SYNC);
 			cf->file_ent = cvs_ent_parse(entry);
-			xfree(entry);
 		}
 	} else {
 		if (co_flags & CO_MERGE) {
@@ -567,27 +598,18 @@ cvs_checkout_file(struct cvs_file *cf, RCSNUM *rnum, char *tag, int co_flags)
 
 		if (!(co_flags & CO_REMOVE)) {
 			cvs_remote_output(entry);
-			xfree(entry);
-		}
-
-		if (!(co_flags & CO_REMOVE)) {
-			if (!(co_flags & CO_MERGE)) {
-				(void)xsnprintf(template, MAXPATHLEN,
-				    "%s/checkout.XXXXXXXXXX", cvs_tmpdir);
-
-				fd = rcs_rev_write_stmp(cf->file_rcs, rnum,
-				    template, 0);
-				tosend = template;
-			}
-
-			cvs_remote_send_file(tosend, fd);
 
 			if (!(co_flags & CO_MERGE)) {
-				close(fd);
-				(void)unlink(template);
-				cvs_worklist_run(&temp_files,
-				    cvs_worklist_unlink);
+				mode = cf->file_rcs->rf_mode;
+				mode |= S_IWUSR;
+				bp = rcs_rev_getbuf(cf->file_rcs, rnum, 0);
+				cvs_remote_send_file_buf(cf->file_path,
+				    bp, mode);
+			} else {
+				cvs_remote_send_file(tosend, fd);
 			}
 		}
 	}
+
+	xfree(entry);
 }

@@ -1,9 +1,9 @@
 #! /bin/sh
-# $Id: bootstrap 1928 2007-11-03 12:59:26Z sam $
+# $Id: bootstrap 1974 2008-04-04 11:32:24Z sam $
 
 # bootstrap: generic bootstrap/autogen.sh script for autotools projects
 #
-# Copyright (c) 2002-2007 Sam Hocevar <sam@zoy.org>
+# Copyright (c) 2002-2008 Sam Hocevar <sam@zoy.org>
 #
 #    This program is free software. It comes without any warranty, to
 #    the extent permitted by applicable law. You can redistribute it
@@ -29,13 +29,14 @@ fi
 
 # Check for needed features
 auxdir="`sed -ne 's/^[ \t]*A._CONFIG_AUX_DIR *([[ ]*\([^] )]*\).*/\1/p' $conffile`"
-libtool="`grep -q '^[ \t]*A._PROG_LIBTOOL' $conffile && echo yes || echo no`"
-header="`grep -q '^[ \t]*A._CONFIG_HEADER' $conffile && echo yes || echo no`"
-aclocalflags="`sed -ne 's/^[ \t]*ACLOCAL_AMFLAGS[ \t]*=//p' Makefile.am`"
+libtool="`grep '^[ \t]*A._PROG_LIBTOOL' $conffile > /dev/null 2>&1 && echo yes || echo no`"
+header="`grep '^[ \t]*A._CONFIG_HEADER' $conffile > /dev/null 2>&1 && echo yes || echo no`"
+makefile="`[ -f Makefile.am ] && echo yes || echo no`"
+aclocalflags="`sed -ne 's/^[ \t]*ACLOCAL_AMFLAGS[ \t]*=//p' Makefile.am 2>/dev/null || :`"
 
 # Check for automake
 amvers="no"
-for v in 10 9 8 7 6 5; do
+for v in 11 10 9 8 7 6 5; do
   if automake-1.${v} --version >/dev/null 2>&1; then
     amvers="-1.${v}"
     break
@@ -61,7 +62,7 @@ fi
 
 # Check for autoconf
 acvers="no"
-for v in "" "259" "253"; do
+for v in "259" "-2.59" "253" "-2.53" ""; do
   if autoconf${v} --version >/dev/null 2>&1; then
     acvers="${v}"
     break
@@ -120,9 +121,11 @@ autoconf${acvers}
 if test "$header" = "yes"; then
   autoheader${acvers}
 fi
-#add --include-deps if you want to bootstrap with any other compiler than gcc
-#automake${amvers} --add-missing --copy --include-deps
-automake${amvers} --foreign --add-missing --copy
+if test "$makefile" = "yes"; then
+  #add --include-deps if you want to bootstrap with any other compiler than gcc
+  #automake${amvers} --add-missing --copy --include-deps
+  automake${amvers} --foreign --add-missing --copy
+fi
 
 # Remove cruft that we no longer want
 rm -Rf autom4te.cache

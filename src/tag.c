@@ -1,4 +1,4 @@
-/*	$OpenBSD: tag.c,v 1.71 2008/03/09 03:14:52 joris Exp $	*/
+/*	$OpenBSD: tag.c,v 1.76 2008/06/20 14:04:29 tobias Exp $	*/
 /*
  * Copyright (c) 2006 Xavier Santolaria <xsa@openbsd.org>
  *
@@ -27,10 +27,13 @@
 #define T_FORCE_MOVE		0x04
 #define T_BRANCH		0x08
 
+void	cvs_tag_check_files(struct cvs_file *);
 void	cvs_tag_local(struct cvs_file *);
 
 static int tag_del(struct cvs_file *);
 static int tag_add(struct cvs_file *);
+
+struct file_info_list	files_info;
 
 static int	 runflags = 0;
 static char	*tag = NULL;
@@ -42,7 +45,7 @@ struct cvs_cmd cvs_cmd_rtag = {
 	CVS_OP_RTAG, CVS_LOCK_REPO, "rtag",
 	{ "rt", "rfreeze" },
 	"Add a symbolic tag to a module",
-	"[-bcdFflR] [-D date | -r rev] tag modules ...",
+	"[-bcdFflR] [-D date | -r rev] symbolic_tag module ...",
 	"bcD:dFflRr:",
 	NULL,
 	cvs_tag
@@ -52,7 +55,7 @@ struct cvs_cmd cvs_cmd_tag = {
 	CVS_OP_TAG, CVS_USE_WDIR | CVS_LOCK_REPO, "tag",
 	{ "ta", "freeze" },
 	"Add a symbolic tag to checked out version of files",
-	"[-bcdFflR] [-D date | -r rev] tag [file ...]",
+	"[-bcdFflR] [-D date | -r rev] symbolic_tag [file ...]",
 	"bcD:dFflRr:",
 	NULL,
 	cvs_tag
@@ -62,8 +65,10 @@ int
 cvs_tag(int argc, char **argv)
 {
 	int ch, flags, i;
+	char repo[MAXPATHLEN];
 	char *arg = ".";
 	struct cvs_recursion cr;
+	struct trigger_list *line_list;
 
 	flags = CR_RECURSE_DIRS;
 
@@ -165,6 +170,9 @@ cvs_tag(int argc, char **argv)
 		if (!(flags & CR_RECURSE_DIRS))
 			cvs_client_send_request("Argument -l");
 
+		if (tag_date != NULL)
+			cvs_client_send_request("Argument -D%s", tag_date);
+
 		if (tag_oldname != NULL)
 			cvs_client_send_request("Argument -r%s", tag_oldname);
 
@@ -174,10 +182,30 @@ cvs_tag(int argc, char **argv)
 		    chdir(current_cvsroot->cr_dir) == -1)
 			fatal("cvs_tag: %s", strerror(errno));
 
-		cr.fileproc = cvs_tag_local;
 	}
 
 	cr.flags = flags;
+
+	cvs_get_repository_name(".", repo, MAXPATHLEN);
+	line_list = cvs_trigger_getlines(CVS_PATH_TAGINFO, repo);
+	if (line_list != NULL) {
+		TAILQ_INIT(&files_info);
+		cr.fileproc = cvs_tag_check_files;
+		if (argc > 0)
+			cvs_file_run(argc, argv, &cr);
+		else
+			cvs_file_run(1, &arg, &cr);
+
+		if (cvs_trigger_handle(CVS_TRIGGER_TAGINFO, repo, NULL,
+		    line_list, &files_info)) {
+			cvs_log(LP_ERR, "Pre-tag check failed");
+			cvs_trigger_freelist(line_list);
+			goto bad;
+		}
+		cvs_trigger_freelist(line_list);
+	}
+
+	cr.fileproc = cvs_tag_local;
 
 	if (cvs_cmdop == CVS_OP_TAG ||
 	    current_cvsroot->cr_method == CVS_METHOD_LOCAL) {
@@ -197,7 +225,100 @@ cvs_tag(int argc, char **argv)
 		cvs_client_get_responses();
 	}
 
+bad:
+	cvs_trigger_freeinfo(&files_info);
 	return (0);
+}
+
+void
+cvs_tag_check_files(struct cvs_file *cf)
+{
+	RCSNUM *srev = NULL, *rev = NULL;
+	char rbuf[CVS_REV_BUFSZ];
+	struct file_info *fi;
+
+	cvs_log(LP_TRACE, "cvs_tag_check_files(%s)", cf->file_path);
+
+	cvs_file_classify(cf, tag);
+
+	if (cf->file_type == CVS_DIR)
+		return;
+
+	if (runflags & T_CHECK_UPTODATE) {
+		if (cf->file_status != FILE_UPTODATE &&
+		    cf->file_status != FILE_CHECKOUT &&
+		    cf->file_status != FILE_PATCH) {
+			return;
+		}
+	}
+
+	switch (cf->file_status) {
+	case FILE_ADDED:
+	case FILE_REMOVED:
+		return;
+	default:
+		break;
+	}
+
+	fi = xcalloc(1, sizeof(*fi));
+	fi->nrevstr = xstrdup(rbuf);
+
+	if (cvs_cmdop == CVS_OP_TAG) {
+		if (cf->file_ent == NULL)
+			return;
+		srev = cf->file_ent->ce_rev;
+	} else
+		srev = cf->file_rcsrev;
+
+	rcsnum_tostr(srev, rbuf, sizeof(rbuf));
+	fi->file_path = xstrdup(cf->file_path);
+
+	if (tag_oldname != NULL)
+		fi->tag_old = xstrdup(tag_oldname);
+	else if (tag_date != NULL)
+		fi->tag_old = xstrdup(tag_date);
+
+	if ((rev = rcs_sym_getrev(cf->file_rcs, tag_name)) != NULL) {
+		if (!rcsnum_differ(srev, rev))
+			goto bad;
+		rcsnum_tostr(rev, rbuf, sizeof(rbuf));
+		fi->crevstr = xstrdup(rbuf);
+	} else if (runflags & T_DELETE)
+		goto bad;
+
+	fi->tag_new = xstrdup(tag_name);
+
+	if (runflags & T_BRANCH)
+		fi->tag_type = 'T';
+	else if (runflags & T_DELETE)
+		fi->tag_type = '?';
+	else
+		fi->tag_type = 'N';
+
+	if (runflags & T_FORCE_MOVE)
+		fi->tag_op = "mov";
+	else if (runflags & T_DELETE)
+		fi->tag_op = "del";
+	else
+		fi->tag_op = "add";
+
+	TAILQ_INSERT_TAIL(&files_info, fi, flist);
+	return;
+
+bad:
+	if (fi->file_path != NULL)
+		xfree(fi->file_path);
+	if (fi->crevstr != NULL)
+		xfree(fi->crevstr);
+	if (fi->nrevstr != NULL)
+		xfree(fi->nrevstr);
+	if (fi->tag_new != NULL)
+		xfree(fi->tag_new);
+	if (fi->tag_old != NULL)
+		xfree(fi->tag_old);
+	if (rev != NULL)
+		rcsnum_free(rev);
+	xfree(fi);
 }
 
 void
@@ -314,6 +435,7 @@ tag_add(struct cvs_file *cf)
 			return (-1);
 		}
 		(void)rcsnum_tostr(trev, trevbuf, sizeof(trevbuf));
+		rcsnum_free(trev);
 
 		if (!(runflags & T_FORCE_MOVE)) {
 			cvs_printf("W %s : %s ", cf->file_path, tag_name);
@@ -331,22 +453,8 @@ tag_add(struct cvs_file *cf)
 	}
 
 	if (runflags & T_BRANCH) {
-		if ((trev = rcsnum_new_branch(srev)) == NULL)
+		if ((trev = rcs_branch_new(cf->file_rcs, srev)) == NULL)
 			fatal("Cannot create a new branch");
-
-		for (;;) {
-			TAILQ_FOREACH(sym, &(cf->file_rcs->rf_symbols), rs_list)
-				if (!rcsnum_cmp(sym->rs_num, trev, 0))
-					break;
-
-			if (sym != NULL) {
-				if (rcsnum_inc(trev) == NULL)
-					fatal("New revision too high");
-				if (rcsnum_inc(trev) == NULL)
-					fatal("New revision too high");
-			} else
-				break;
-		}
 	} else {
 		trev = rcsnum_alloc();
 		rcsnum_cpy(srev, trev, 0);

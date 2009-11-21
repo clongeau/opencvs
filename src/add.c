@@ -1,4 +1,4 @@
-/*	$OpenBSD: add.c,v 1.97 2008/03/09 03:41:55 joris Exp $	*/
+/*	$OpenBSD: add.c,v 1.105 2008/06/15 04:38:52 tobias Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  * Copyright (c) 2005, 2006 Xavier Santolaria <xsa@openbsd.org>
@@ -19,6 +19,7 @@
 #include <sys/stat.h>
 
 #include <errno.h>
+#include <fcntl.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -27,6 +28,7 @@
 
 extern char *__progname;
 
+void	cvs_add_loginfo(char *);
 void	cvs_add_entry(struct cvs_file *);
 void	cvs_add_remote(struct cvs_file *);
 
@@ -37,7 +39,8 @@ static void add_entry(struct cvs_file *);
 int		kflag = 0;
 static char	kbuf[8];
 
-char	*logmsg;
+extern char	*logmsg;
+extern char	*loginfo;
 
 struct cvs_cmd cvs_cmd_add = {
 	CVS_OP_ADD, CVS_USE_WDIR, "add",
@@ -64,7 +67,7 @@ cvs_add(int argc, char **argv)
 			kflag = rcs_kflag_get(optarg);
 			if (RCS_KWEXP_INVAL(kflag)) {
 				cvs_log(LP_ERR,
-				    "invalid RCS keyword expension mode");
+				    "invalid RCS keyword expansion mode");
 				fatal("%s", cvs_cmd_add.cmd_synopsis);
 			}
 			(void)xsnprintf(kbuf, sizeof(kbuf), "-k%s", optarg);
@@ -97,6 +100,9 @@ cvs_add(int argc, char **argv)
 		if (logmsg != NULL)
 			cvs_client_send_logmsg(logmsg);
 	} else {
+		if (logmsg != NULL && cvs_logmsg_verify(logmsg))
+			return (0);
+
 		cr.fileproc = cvs_add_local;
 	}
 
@@ -132,7 +138,6 @@ cvs_add_entry(struct cvs_file *cf)
 
 		entlist = cvs_ent_open(cf->file_wd);
 		cvs_ent_add(entlist, entry);
-		cvs_ent_close(entlist, ENT_SYNC);
 
 		xfree(entry);
 	} else {
@@ -189,6 +194,101 @@ cvs_add_remote(struct cvs_file *cf)
 	}
 }
 
+void
+cvs_add_loginfo(char *repo)
+{
+	BUF *buf;
+	char pwd[MAXPATHLEN];
+
+	if (getcwd(pwd, sizeof(pwd)) == NULL)
+		fatal("Can't get working directory");
+
+	buf = cvs_buf_alloc(1024);
+
+	cvs_trigger_loginfo_header(buf, repo);
+
+	cvs_buf_puts(buf, "Log Message:\nDirectory ");
+	cvs_buf_puts(buf, current_cvsroot->cr_dir);
+	cvs_buf_putc(buf, '/');
+	cvs_buf_puts(buf, repo);
+	cvs_buf_puts(buf, " added to the repository\n");
+
+	cvs_buf_putc(buf, '\0');
+
+	loginfo = cvs_buf_release(buf);
+}
+
+void
+cvs_add_tobranch(struct cvs_file *cf, char *tag)
+{
+	BUF *bp;
+	char attic[MAXPATHLEN], repo[MAXPATHLEN];
+	char *msg;
+	struct stat st;
+	struct rcs_delta *rdp;
+	RCSNUM *branch;
+
+	cvs_log(LP_TRACE, "cvs_add_tobranch(%s)", cf->file_name);
+
+	if (cvs_noexec == 1)
+		return;
+
+	if (fstat(cf->fd, &st) == -1)
+		fatal("cvs_add_tobranch: %s", strerror(errno));
+
+	cvs_get_repository_path(cf->file_wd, repo, MAXPATHLEN);
+	(void)xsnprintf(attic, MAXPATHLEN, "%s/%s",
+	    repo, CVS_PATH_ATTIC);
+
+	if (mkdir(attic, 0755) == -1 && errno != EEXIST)
+		fatal("cvs_add_tobranch: failed to create Attic");
+
+	(void)xsnprintf(attic, MAXPATHLEN, "%s/%s/%s%s", repo,
+	    CVS_PATH_ATTIC, cf->file_name, RCS_FILE_EXT);
+
+	xfree(cf->file_rpath);
+	cf->file_rpath = xstrdup(attic);
+
+	cf->repo_fd = open(cf->file_rpath, O_CREAT|O_RDONLY);
+	if (cf->repo_fd < 0)
+		fatal("cvs_add_tobranch: %s: %s", cf->file_rpath,
+		    strerror(errno));
+
+	cf->file_rcs = rcs_open(cf->file_rpath, cf->repo_fd,
+	    RCS_CREATE|RCS_WRITE, 0444);
+	if (cf->file_rcs == NULL)
+		fatal("cvs_add_tobranch: failed to create RCS file for %s",
+		    cf->file_path);
+
+	if ((branch = rcsnum_parse("1.1.2")) == NULL)
+		fatal("cvs_add_tobranch: failed to parse branch");
+
+	if (rcs_sym_add(cf->file_rcs, tag, branch) == -1)
+		fatal("cvs_add_tobranch: failed to add vendor tag");
+
+	(void)xasprintf(&msg, "file %s was initially added on branch %s.",
+	    cf->file_name, tag);
+	if (rcs_rev_add(cf->file_rcs, RCS_HEAD_REV, msg, -1, NULL) == -1)
+		fatal("cvs_add_tobranch: failed to create first branch "
+		    "revision");
+	xfree(msg);
+
+	if ((rdp = rcs_findrev(cf->file_rcs, cf->file_rcs->rf_head)) == NULL)
+		fatal("cvs_add_tobranch: cannot find newly added revision");
+
+	bp = cvs_buf_alloc(1);
+
+	if (rcs_deltatext_set(cf->file_rcs,
+	    cf->file_rcs->rf_head, bp) == -1)
+		fatal("cvs_add_tobranch: failed to set deltatext");
+
+	rcs_comment_set(cf->file_rcs, " * ");
+
+	if (rcs_state_set(cf->file_rcs, cf->file_rcs->rf_head, RCS_STATE_DEAD)
+	    == -1)
+		fatal("cvs_add_tobranch: failed to set state");
+}
+
 static void
 add_directory(struct cvs_file *cf)
 {
@@ -196,6 +296,9 @@ add_directory(struct cvs_file *cf)
 	struct stat st;
 	CVSENTRIES *entlist;
 	char *date, entry[MAXPATHLEN], msg[1024], repo[MAXPATHLEN], *tag, *p;
+	struct file_info_list files_info;
+	struct file_info *fi;
+	struct trigger_list *line_list;
 
 	cvs_log(LP_TRACE, "add_directory(%s)", cf->file_path);
 
@@ -250,7 +353,6 @@ add_directory(struct cvs_file *cf)
 
 			entlist = cvs_ent_open(cf->file_wd);
 			cvs_ent_add(entlist, p);
-			cvs_ent_close(entlist, ENT_SYNC);
 			xfree(p);
 		}
 	}
@@ -277,6 +379,24 @@ add_directory(struct cvs_file *cf)
 			xfree(tag);
 		if (date != NULL)
 			xfree(date);
+
+		cvs_get_repository_name(cf->file_path, repo, MAXPATHLEN);
+		line_list = cvs_trigger_getlines(CVS_PATH_LOGINFO, repo);
+		if (line_list != NULL) {
+			TAILQ_INIT(&files_info);
+			fi = xcalloc(1, sizeof(*fi));
+			fi->file_path = xstrdup(cf->file_path);
+			TAILQ_INSERT_TAIL(&files_info, fi, flist);
+
+			cvs_add_loginfo(repo);
+			cvs_trigger_handle(CVS_TRIGGER_LOGINFO, repo,
+			    loginfo, line_list, &files_info);
+
+			cvs_trigger_freeinfo(&files_info);
+			cvs_trigger_freelist(line_list);
+			if (loginfo != NULL)
+				xfree(loginfo);
+		}
 	}
 
 	cf->file_status = FILE_SKIP;
@@ -287,7 +407,7 @@ add_file(struct cvs_file *cf)
 {
 	int added, nb, stop;
 	char revbuf[CVS_REV_BUFSZ];
-	RCSNUM *head;
+	RCSNUM *head = NULL;
 	char *tag;
 
 	cvs_parse_tagfile(cf->file_wd, &tag, NULL, &nb);
@@ -298,16 +418,17 @@ add_file(struct cvs_file *cf)
 
 	if (cf->file_rcs != NULL) {
 		head = rcs_head_get(cf->file_rcs);
-		if (head == NULL)
-			fatal("RCS head empty or missing in %s\n",
-			    cf->file_rcs->rf_path);
+		if (head == NULL) {
+			cvs_log(LP_NOTICE, "no head revision in RCS file for "
+			    "%s", cf->file_path);
+		}
 		rcsnum_tostr(head, revbuf, sizeof(revbuf));
-		rcsnum_free(head);
 	}
 
 	added = stop = 0;
 	switch (cf->file_status) {
 	case FILE_ADDED:
+	case FILE_CHECKOUT:
 		if (verbosity > 1)
 			cvs_log(LP_NOTICE, "%s has already been entered",
 			    cf->file_path);
@@ -321,12 +442,7 @@ add_file(struct cvs_file *cf)
 			add_entry(cf);
 
 			/* Restore the file. */
-			head = rcs_head_get(cf->file_rcs);
-			if (head == NULL)
-				fatal("RCS head empty or missing in %s\n",
-				    cf->file_rcs->rf_path);
 			cvs_checkout_file(cf, head, NULL, 0);
-			rcsnum_free(head);
 
 			cvs_printf("U %s\n", cf->file_path);
 
@@ -364,6 +480,9 @@ add_file(struct cvs_file *cf)
 	default:
 		break;
 	}
+
+	if (head != NULL)
+		rcsnum_free(head);
 
 	if (stop == 1)
 		return;
@@ -408,8 +527,9 @@ add_entry(struct cvs_file *cf)
 		    0, 0, entry, CVS_ENT_MAXLINELEN);
 	} else {
 		if (logmsg != NULL) {
-			(void)xsnprintf(path, MAXPATHLEN, "%s/%s%s",
-			    CVS_PATH_CVSDIR, cf->file_name, CVS_DESCR_FILE_EXT);
+			(void)xsnprintf(path, MAXPATHLEN, "%s/%s/%s%s",
+			    cf->file_wd, CVS_PATH_CVSDIR, cf->file_name,
+			    CVS_DESCR_FILE_EXT);
 
 			if ((fp = fopen(path, "w+")) == NULL)
 				fatal("add_entry: fopen `%s': %s",
@@ -443,7 +563,6 @@ add_entry(struct cvs_file *cf)
 	} else {
 		entlist = cvs_ent_open(cf->file_wd);
 		cvs_ent_add(entlist, entry);
-		cvs_ent_close(entlist, ENT_SYNC);
 	}
 	xfree(entry);
 }

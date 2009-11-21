@@ -1,4 +1,4 @@
-/*	$OpenBSD: logmsg.c,v 1.47 2008/03/09 01:02:38 tobias Exp $	*/
+/*	$OpenBSD: logmsg.c,v 1.50 2008/06/10 01:00:34 joris Exp $	*/
 /*
  * Copyright (c) 2007 Joris Vink <joris@openbsd.org>
  *
@@ -21,6 +21,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <libgen.h>
 #include <paths.h>
 #include <signal.h>
 #include <stdlib.h>
@@ -58,7 +59,7 @@ cvs_logmsg_read(const char *path)
 		fatal("cvs_logmsg_read: fdopen %s", strerror(errno));
 
 	if (st.st_size > SIZE_MAX)
-		fatal("cvs_buf_load_fd: %s: file size too big", path);
+		fatal("cvs_logmsg_read: %s: file size too big", path);
 
 	lbuf = NULL;
 	bp = cvs_buf_alloc(st.st_size);
@@ -92,14 +93,22 @@ cvs_logmsg_read(const char *path)
 }
 
 char *
-cvs_logmsg_create(struct cvs_flisthead *added, struct cvs_flisthead *removed,
-	struct cvs_flisthead *modified)
+cvs_logmsg_create(char *dir, struct cvs_flisthead *added,
+    struct cvs_flisthead *removed, struct cvs_flisthead *modified)
 {
-	FILE *fp;
-	int c, fd, saved_errno;
+	FILE *fp, *rp;
+	int c, fd, rd, saved_errno;
 	struct cvs_filelist *cf;
 	struct stat st1, st2;
-	char *fpath, *logmsg;
+	char *fpath, *logmsg, repo[MAXPATHLEN];
+	struct stat st;
+	struct trigger_list *line_list;
+	struct trigger_line *line;
+	static int reuse = 0;
+	static char *prevmsg = NULL;
+
+	if (reuse)
+		return xstrdup(prevmsg);
 
 	(void)xasprintf(&fpath, "%s/cvsXXXXXXXXXX", cvs_tmpdir);
 
@@ -114,31 +123,71 @@ cvs_logmsg_create(struct cvs_flisthead *added, struct cvs_flisthead *removed,
 		fatal("cvs_logmsg_create: fdopen %s", strerror(saved_errno));
 	}
 
-	fprintf(fp, "\n%s %s\n%s Enter Log.  Lines beginning with `%s' are "
+	if (prevmsg != NULL && prevmsg[0] != '\0')
+		fprintf(fp, "%s", prevmsg);
+	else
+		fputc('\n', fp);
+
+	line_list = cvs_trigger_getlines(CVS_PATH_RCSINFO, repo);
+	if (line_list != NULL) {
+		TAILQ_FOREACH(line, line_list, flist) {
+			if ((rd = open(line->line, O_RDONLY)) == -1)
+				fatal("cvs_logmsg_create: open %s",
+				    strerror(errno));
+			if (fstat(rd, &st) == -1)
+				fatal("cvs_logmsg_create: fstat %s",
+				    strerror(errno));
+			if (!S_ISREG(st.st_mode))
+				fatal("cvs_logmsg_create: file is not a "
+				    "regular file");
+			if ((rp = fdopen(rd, "r")) == NULL)
+				fatal("cvs_logmsg_create: fdopen %s",
+				    strerror(errno));
+			if (st.st_size > SIZE_MAX)
+				fatal("cvs_logmsg_create: %s: file size "
+				    "too big", line->line);
+			logmsg = xmalloc(st.st_size);
+			fread(logmsg, st.st_size, 1, rp);
+			fwrite(logmsg, st.st_size, 1, fp);
+			xfree(logmsg);
+			(void)fclose(rp);
+		}
+		cvs_trigger_freelist(line_list);
+	}
+
+	fprintf(fp, "%s %s\n%s Enter Log.  Lines beginning with `%s' are "
 	    "removed automatically\n%s\n", CVS_LOGMSG_PREFIX, CVS_LOGMSG_LINE,
 	    CVS_LOGMSG_PREFIX, CVS_LOGMSG_PREFIX, CVS_LOGMSG_PREFIX);
+
+	if (cvs_cmdop == CVS_OP_COMMIT) {
+		fprintf(fp, "%s Committing in %s\n%s\n", CVS_LOGMSG_PREFIX,
+		    dir != NULL ? dir : ".", CVS_LOGMSG_PREFIX);
+	}
 
 	if (added != NULL && !TAILQ_EMPTY(added)) {
 		fprintf(fp, "%s Added Files:", CVS_LOGMSG_PREFIX);
 		TAILQ_FOREACH(cf, added, flist)
-			fprintf(fp, "\n%s\t%s",
-			    CVS_LOGMSG_PREFIX, cf->file_path);
+			fprintf(fp, "\n%s\t%s", CVS_LOGMSG_PREFIX,
+			    dir != NULL ? basename(cf->file_path) :
+			    cf->file_path);
 		fputs("\n", fp);
 	}
 
 	if (removed != NULL && !TAILQ_EMPTY(removed)) {
 		fprintf(fp, "%s Removed Files:", CVS_LOGMSG_PREFIX);
 		TAILQ_FOREACH(cf, removed, flist)
-			fprintf(fp, "\n%s\t%s",
-			    CVS_LOGMSG_PREFIX, cf->file_path);
+			fprintf(fp, "\n%s\t%s", CVS_LOGMSG_PREFIX,
+			    dir != NULL ? basename(cf->file_path) :
+			    cf->file_path);
 		fputs("\n", fp);
 	}
 
 	if (modified != NULL && !TAILQ_EMPTY(modified)) {
 		fprintf(fp, "%s Modified Files:", CVS_LOGMSG_PREFIX);
 		TAILQ_FOREACH(cf, modified, flist)
-			fprintf(fp, "\n%s\t%s",
-			    CVS_LOGMSG_PREFIX, cf->file_path);
+			fprintf(fp, "\n%s\t%s", CVS_LOGMSG_PREFIX,
+			    dir != NULL ? basename(cf->file_path) :
+			    cf->file_path);
 		fputs("\n", fp);
 	}
 
@@ -166,21 +215,33 @@ cvs_logmsg_create(struct cvs_flisthead *added, struct cvs_flisthead *removed,
 
 		if (st1.st_mtime != st2.st_mtime) {
 			logmsg = cvs_logmsg_read(fpath);
+			if (prevmsg != NULL)
+				xfree(prevmsg);
+			prevmsg = xstrdup(logmsg);
 			break;
 		}
 
 		printf("\nLog message unchanged or not specified\n"
-		    "a)bort, c)ontinue, e)dit\nAction: (continue) ");
+		    "a)bort, c)ontinue, e)dit, !)reuse this message "
+		    "unchanged for remaining dirs\nAction: (continue) ");
 		(void)fflush(stdout);
 
 		c = getc(stdin);
 		if (c == EOF || c == 'a') {
 			fatal("Aborted by user");
 		} else if (c == '\n' || c == 'c') {
-			logmsg = xstrdup("");
+			if (prevmsg == NULL)
+				prevmsg = xstrdup("");
+			logmsg = xstrdup(prevmsg);
 			break;
 		} else if (c == 'e') {
 			continue;
+		} else if (c == '!') {
+			reuse = 1;
+			if (prevmsg == NULL)
+				prevmsg = xstrdup("");
+			logmsg = xstrdup(prevmsg);
+			break;
 		} else {
 			cvs_log(LP_ERR, "invalid input");
 			continue;
@@ -242,3 +303,41 @@ cvs_logmsg_edit(const char *pathname)
 	errno = saved_errno;
 	return (-1);
 }
+
+int
+cvs_logmsg_verify(char *logmsg)
+{
+	int fd, ret = 0;
+	char *fpath;
+	struct trigger_list *line_list;
+	struct file_info_list files_info;
+	struct file_info *fi;
+
+	line_list = cvs_trigger_getlines(CVS_PATH_VERIFYMSG, "DEFAULT");
+	if (line_list != NULL) {
+		TAILQ_INIT(&files_info);
+
+		(void)xasprintf(&fpath, "%s/cvsXXXXXXXXXX", cvs_tmpdir);
+		if ((fd = mkstemp(fpath)) == -1)
+			fatal("cvs_logmsg_verify: mkstemp %s", strerror(errno));
+
+		fi = xcalloc(1, sizeof(*fi));
+		fi->file_path = xstrdup(fpath);
+		TAILQ_INSERT_TAIL(&files_info, fi, flist);
+
+		if (cvs_trigger_handle(CVS_TRIGGER_VERIFYMSG, NULL, NULL,
+		    line_list, &files_info)) {
+			cvs_log(LP_ERR, "Log message check failed");
+			ret = 1;
+		}
+
+		cvs_trigger_freeinfo(&files_info);
+		(void)close(fd);
+		(void)unlink(fpath);
+		xfree(fpath);
+		cvs_trigger_freelist(line_list);
+	}
+
+	return ret;
+}
+

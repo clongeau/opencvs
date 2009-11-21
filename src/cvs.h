@@ -1,4 +1,4 @@
-/*	$OpenBSD: cvs.h,v 1.164 2008/03/09 03:14:52 joris Exp $	*/
+/*	$OpenBSD: cvs.h,v 1.170 2008/06/17 11:05:39 joris Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -35,6 +35,7 @@
 #include "log.h"
 #include "worklist.h"
 #include "repository.h"
+#include "trigger.h"
 #include "util.h"
 #include "xmalloc.h"
 
@@ -101,7 +102,6 @@
 #define CVS_CMD_MAXNAMELEN	16
 #define CVS_CMD_MAXALIAS	2
 #define CVS_CMD_MAXDESCRLEN	64
-#define CVS_CMD_MAXARG		128
 
 /* flags */
 #define CVS_USE_WDIR		0x01
@@ -313,6 +313,7 @@ extern char *cvs_tmpdir;
 extern char *import_repository;
 extern char *cvs_server_path;
 extern time_t cvs_specified_date;
+extern time_t cvs_directory_date;
 extern char *cvs_specified_tag;
 extern char *cvs_directory_tag;
 
@@ -326,7 +327,6 @@ extern int  cvs_nocase;
 extern int  cvs_noexec;
 extern int  cvs_readonly;
 extern int  cvs_readonlyfs;
-extern int  cvs_error;
 extern int  cvs_server_active;
 extern int  reset_option;
 extern int  reset_tag;
@@ -363,10 +363,14 @@ extern struct cvs_cmd cvs_cmd_unedit;
 extern struct cvs_cmd cvs_cmd_watch;
 extern struct cvs_cmd cvs_cmd_watchers;
 
+/* add.c */
+void		 cvs_add_tobranch(struct cvs_file *, char *);
+
 /* cmd.c */
 struct cvs_cmd	*cvs_findcmd(const char *);
 
 /* cvs.c */
+int		 cvs_build_cmd(char ***, char **, int);
 int		 cvs_var_set(const char *, const char *);
 int		 cvs_var_unset(const char *);
 const char	*cvs_var_get(const char *);
@@ -392,9 +396,10 @@ void		cvs_write_tagfile(const char *, char *, char *);
 struct cvsroot	*cvsroot_get(const char *);
 
 /* logmsg.c */
-char *	cvs_logmsg_read(const char *path);
-char *	cvs_logmsg_create(struct cvs_flisthead *, struct cvs_flisthead *,
-	struct cvs_flisthead *);
+char	*cvs_logmsg_read(const char *);
+char	*cvs_logmsg_create(char *, struct cvs_flisthead *,
+	     struct cvs_flisthead *, struct cvs_flisthead *);
+int	 cvs_logmsg_verify(char *);
 
 /* misc stuff */
 void	cvs_update_local(struct cvs_file *);

@@ -1,3 +1,21 @@
+2008-06-21  chl  <chl@tuxfamily.org>
+
+	- update bootstrap script by following Andrey Oktyabrsky advises
+	about missing -q option for grep on Solaris.
+	- add #include <netdb.h> to edit.c due to MAXHOSTNAMELEN use when
+	building on Solaris (reported by Mike Belopuhov).
+	- deals with u_intXX_t types which are not declared on Solaris
+	(reported by Mike Belopuhov), by doing the same as in
+	openssh-portable.
+	- do #include <dirent.h> and only if it does not exist, #include
+	<sys/dirent.h> (reported by Mike Belopuhov).
+	- On Solaris, struct module_info is already defined in
+	/usr/include/sys/stream.h. So rename module_info to
+	cvs_module_info (reported by Mike Belopuhov).
+	- add -D_POSIX_PTHREAD_SEMANTICS to CFLAGS for allow ctime_r to
+	work properly on Solaris (reported by Mike Belopuhov).
+	- update from the latest OpenCVS cvs repo (source and regress).
+
 2008-03-10  chl  <chl@tuxfamily.org>
 
 	- update from the latest OpenCVS cvs repo (source and regress).

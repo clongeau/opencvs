@@ -1,4 +1,4 @@
-/*	$OpenBSD: entries.c,v 1.95 2008/03/01 21:29:36 deraadt Exp $	*/
+/*	$OpenBSD: entries.c,v 1.100 2008/06/14 20:04:14 joris Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -29,6 +29,8 @@
 
 static struct cvs_ent_line *ent_get_line(CVSENTRIES *, const char *);
 
+CVSENTRIES *current_list = NULL;
+
 CVSENTRIES *
 cvs_ent_open(const char *dir)
 {
@@ -38,10 +40,19 @@ cvs_ent_open(const char *dir)
 	struct cvs_ent *ent;
 	struct cvs_ent_line *line;
 
-	ep = (CVSENTRIES *)xcalloc(1, sizeof(*ep));
+	cvs_log(LP_TRACE, "cvs_ent_open(%s)", dir);
 
 	(void)xsnprintf(buf, sizeof(buf), "%s/%s", dir, CVS_PATH_ENTRIES);
 
+	if (current_list != NULL && !strcmp(current_list->cef_path, buf))
+		return (current_list);
+
+	if (current_list != NULL) {
+		cvs_ent_close(current_list, ENT_SYNC);
+		current_list = NULL;
+	}
+
+	ep = (CVSENTRIES *)xcalloc(1, sizeof(*ep));
 	ep->cef_path = xstrdup(buf);
 
 	(void)xsnprintf(buf, sizeof(buf), "%s/%s",
@@ -101,6 +112,7 @@ cvs_ent_open(const char *dir)
 		(void)fclose(fp);
 	}
 
+	current_list = ep;
 	return (ep);
 }
 
@@ -110,7 +122,7 @@ cvs_ent_parse(const char *entry)
 	int i;
 	struct tm t, dt;
 	struct cvs_ent *ent;
-	char *fields[CVS_ENTRIES_NFIELDS], *buf, *sp, *dp;
+	char *fields[CVS_ENTRIES_NFIELDS], *buf, *sp, *dp, *p;
 
 	buf = sp = xstrdup(entry);
 	i = 0;
@@ -157,16 +169,20 @@ cvs_ent_parse(const char *entry)
 		if (fields[3][0] == '\0' ||
 		    strncmp(fields[3], CVS_DATE_DUMMY, sizeof(CVS_DATE_DUMMY) - 1) == 0 ||
 		    strncmp(fields[3], "Initial ", 8) == 0 ||
-		    strncmp(fields[3], "Result of merge", 15) == 0) {
+		    strcmp(fields[3], "Result of merge") == 0) {
 			ent->ce_mtime = CVS_DATE_DMSEC;
 		} else if (cvs_server_active == 1 &&
 		    strncmp(fields[3], CVS_SERVER_UNCHANGED,
 		    strlen(CVS_SERVER_UNCHANGED)) == 0) {
 			ent->ce_mtime = CVS_SERVER_UPTODATE;
 		} else {
+			p = fields[3];
+			if (strncmp(fields[3], "Result of merge+", 16) == 0)
+				p += 16;
+
 			/* Date field can be a '+=' with remote to indicate
 			 * conflict.  In this case do nothing. */
-			if (strptime(fields[3], "%a %b %d %T %Y", &t) != NULL) {
+			if (strptime(p, "%a %b %d %T %Y", &t) != NULL) {
 
 				t.tm_isdst = -1;	/* Figure out DST. */
 				t.tm_gmtoff = 0;
@@ -232,15 +248,17 @@ cvs_ent_close(CVSENTRIES *ep, int writefile)
 	int dflag;
 
 	dflag = 1;
+	cvs_log(LP_TRACE, "cvs_ent_close(%s, %d)", ep->cef_bpath, writefile);
 
-	if (writefile) {
-		if ((fp = fopen(ep->cef_bpath, "w")) == NULL)
-			fatal("cvs_ent_close: fopen: `%s': %s",
-			    ep->cef_path, strerror(errno));
-	}
+	if (cvs_cmdop == CVS_OP_EXPORT)
+		writefile = 0;
+
+	fp = NULL;
+	if (writefile)
+		fp = fopen(ep->cef_bpath, "w");
 
 	while ((l = TAILQ_FIRST(&(ep->cef_ent))) != NULL) {
-		if (writefile) {
+		if (fp != NULL) {
 			if (l->buf[0] == 'D')
 				dflag = 0;
 
@@ -253,7 +271,7 @@ cvs_ent_close(CVSENTRIES *ep, int writefile)
 		xfree(l);
 	}
 
-	if (writefile) {
+	if (fp != NULL) {
 		if (dflag) {
 			fputc('D', fp);
 			fputc('\n', fp);
@@ -400,6 +418,8 @@ cvs_parse_tagfile(char *dir, char **tagp, char **datep, int *nbp)
 	struct tm datetm;
 	char linebuf[128], tagpath[MAXPATHLEN];
 
+	cvs_directory_date = -1;
+
 	if (tagp != NULL)
 		*tagp = NULL;
 
@@ -447,8 +467,7 @@ cvs_parse_tagfile(char *dir, char **tagp, char **datep, int *nbp)
 			datetm.tm_year -= 1900;
 			datetm.tm_mon -= 1;
 
-			if (cvs_specified_date == -1)
-				cvs_specified_date = timegm(&datetm);
+			cvs_directory_date = timegm(&datetm);
 
 			if (datep != NULL)
 				*datep = xstrdup(linebuf + 1);
@@ -476,7 +495,7 @@ cvs_write_tagfile(const char *dir, char *tag, char *date)
 	RCSNUM *rev;
 	char tagpath[MAXPATHLEN];
 	char sticky[CVS_REV_BUFSZ];
-	struct tm *datetm;
+	struct tm datetm;
 	int i;
 
 	cvs_log(LP_TRACE, "cvs_write_tagfile(%s, %s, %s)", dir,
@@ -489,7 +508,8 @@ cvs_write_tagfile(const char *dir, char *tag, char *date)
 	if (i < 0 || i >= MAXPATHLEN)
 		return;
 
-	if (tag != NULL || cvs_specified_date != -1) {
+	if (tag != NULL || cvs_specified_date != -1 ||
+	    cvs_directory_date != -1) {
 		if ((fp = fopen(tagpath, "w+")) == NULL) {
 			if (errno != ENOENT) {
 				cvs_log(LP_NOTICE, "failed to open `%s' : %s",
@@ -508,9 +528,12 @@ cvs_write_tagfile(const char *dir, char *tag, char *date)
 				    "T%s", tag);
 			}
 		} else {
-			datetm = gmtime(&cvs_specified_date);
+			if (cvs_specified_date != -1)
+				gmtime_r(&cvs_specified_date, &datetm);
+			else
+				gmtime_r(&cvs_directory_date, &datetm);
 			(void)strftime(sticky, sizeof(sticky),
-			    "D"CVS_DATE_FMT, datetm);
+			    "D"CVS_DATE_FMT, &datetm);
 		}
 
 		if (cvs_server_active == 1)

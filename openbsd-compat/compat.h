@@ -1,22 +1,22 @@
+#include <sys/types.h>
+
 #include <stdio.h>
 #include <string.h>
 
 #include "../config.h"
+#include "defines.h"
+#include <sys/types.h>
 #include "sys-queue.h"
 
-#ifndef __dead
-# define __dead __attribute__((noreturn))
-#endif
-
-#ifdef HAVE_SYS_DIRENT_H
-#include <sys/dirent.h>
-#else
-	#ifdef HAVE_DIRENT_H
+#ifdef HAVE_DIRENT_H
 	#include <dirent.h>
+#else
+	#ifdef HAVE_SYS_DIRENT_H
+		#include <sys/dirent.h>
 	#else
-	#error "no dirent"
-	#endif
-#endif
+		#error "no dirent"
+	#endif /* HAVE_SYS_DIRENT_H */
+#endif /* HAVE_DIRENT_H */
 
 #ifdef HAVE_SYS_TIME_H
 #include <sys/time.h>
@@ -31,13 +31,7 @@
 #define MAXBSIZE 4096
 #endif
 
-/* From /usr/include/i386/limits.h */
-#ifndef SIZE_T_MAX
-#define SIZE_T_MAX UINT_MAX
-#endif
-
 #ifndef MD5_BLOCK_LENGTH
-#include <sys/types.h>
 
 #define	MD5_BLOCK_LENGTH		64
 #define	MD5_DIGEST_LENGTH		16
@@ -77,3 +71,11 @@ size_t strlcat(char *dst, const char *src, size_t size);
 #ifndef HAVE_FGETLN
 char * fgetln(FILE *stream, size_t *len);
 #endif
+
+#if !defined(HAVE_GETOPT) || !defined(HAVE_GETOPT_OPTRESET)
+int BSDgetopt(int argc, char * const *argv, const char *opts);
+char	*BSDoptarg;		/* argument associated with option */
+int	BSDoptind;		/* index into parent argv vector */
+#endif
+
+

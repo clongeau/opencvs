@@ -1,4 +1,4 @@
-/*	$OpenBSD: cvs.c,v 1.144 2008/03/08 20:52:36 tobias Exp $	*/
+/*	$OpenBSD: cvs.c,v 1.149 2008/06/17 11:05:39 joris Exp $	*/
 /*
  * Copyright (c) 2006, 2007 Joris Vink <joris@openbsd.org>
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
@@ -45,7 +45,7 @@ static int optreset;
 extern char *__progname;
 
 /* verbosity level: 0 = really quiet, 1 = quiet, 2 = verbose */
-int verbosity = 1;
+int verbosity = 2;
 
 /* compression level used with zlib, 0 meaning no compression taking place */
 int	cvs_compress = 0;
@@ -56,7 +56,6 @@ int	cvs_readonly = 0;
 int	cvs_readonlyfs = 0;
 int	cvs_nocase = 0;	/* set to 1 to disable filename case sensitivity */
 int	cvs_noexec = 0;	/* set to 1 to disable disk operations (-n option) */
-int	cvs_error = -1;	/* set to the correct error code on failure */
 int	cvs_cmdop;
 int	cvs_umask = CVS_UMASK_DEFAULT;
 int	cvs_server_active = 0;
@@ -82,6 +81,8 @@ struct cvs_wklhead temp_files;
 void sighandler(int);
 volatile sig_atomic_t cvs_quit = 0;
 volatile sig_atomic_t sig_received = 0;
+
+extern CVSENTRIES *current_list;
 
 void
 sighandler(int sig)
@@ -116,21 +117,71 @@ cvs_cleanup(void)
 		xfree(cvs_server_path);
 		cvs_server_path = NULL;
 	}
+
+	if (current_list != NULL)
+		cvs_ent_close(current_list, ENT_SYNC);
 }
 
 __dead void
 usage(void)
 {
 	(void)fprintf(stderr,
-	    "usage: %s [-flnQqRrtVvw] [-d root] [-e editor] [-s var=val]\n"
+	    "usage: %s [-flnQqRrtvw] [-d root] [-e editor] [-s var=val]\n"
 	    "           [-T tmpdir] [-z level] command ...\n", __progname);
 	exit(1);
 }
 
 int
+cvs_build_cmd(char ***cmd_argv, char **argv, int argc)
+{
+	int cmd_argc, i, cur;
+	char *cp, *linebuf, *lp;
+
+	if (cmdp->cmd_defargs == NULL) {
+		*cmd_argv = argv;
+		return argc;
+	}
+
+	cur = argc + 2;
+	cmd_argc = 0;
+	*cmd_argv = xcalloc(cur, sizeof(char *));
+	(*cmd_argv)[cmd_argc++] = argv[0];
+
+	linebuf = xstrdup(cmdp->cmd_defargs);
+	for (lp = linebuf; lp != NULL;) {
+		cp = strsep(&lp, " \t\b\f\n\r\t\v");
+		if (cp == NULL)
+			break;
+		if (*cp == '\0')
+			continue;
+
+		if (cmd_argc == cur) {
+			cur += 8;
+			*cmd_argv = xrealloc(*cmd_argv, cur,
+			    sizeof(char *));
+		}
+
+		(*cmd_argv)[cmd_argc++] = cp;
+	}
+
+	if (cmd_argc + argc > cur) {
+		cur = cmd_argc + argc + 1;
+		*cmd_argv = xrealloc(*cmd_argv, cur,
+		    sizeof(char *));
+        }
+
+	for (i = 1; i < argc; i++)
+		(*cmd_argv)[cmd_argc++] = argv[i];
+
+	(*cmd_argv)[cmd_argc] = NULL;
+
+	return cmd_argc;
+}
+
+int
 main(int argc, char **argv)
 {
-	char *envstr, *cmd_argv[CVS_CMD_MAXARG], **targv;
+	char *envstr, **cmd_argv, **targv;
 	int i, ret, cmd_argc;
 	struct passwd *pw;
 	struct stat st;
@@ -174,16 +225,6 @@ main(int argc, char **argv)
 	if (argc == 0)
 		usage();
 
-	/*
-	 * check the tmp dir, either specified through
-	 * the environment variable TMPDIR, or via
-	 * the global option -T <dir>
-	 */
-	if (stat(cvs_tmpdir, &st) == -1)
-		fatal("stat failed on `%s': %s", cvs_tmpdir, strerror(errno));
-	else if (!S_ISDIR(st.st_mode))
-		fatal("`%s' is not valid temporary directory", cvs_tmpdir);
-
 	cmdp = cvs_findcmd(argv[0]);
 	if (cmdp == NULL) {
 		fprintf(stderr, "Unknown command: `%s'\n\n", argv[0]);
@@ -193,6 +234,16 @@ main(int argc, char **argv)
 			    cvs_cdt[i]->cmd_name, cvs_cdt[i]->cmd_descr);
 		exit(1);
 	}
+
+	/*
+	 * check the tmp dir, either specified through
+	 * the environment variable TMPDIR, or via
+	 * the global option -T <dir>
+	 */
+	if (stat(cvs_tmpdir, &st) == -1)
+		fatal("stat failed on `%s': %s", cvs_tmpdir, strerror(errno));
+	else if (!S_ISDIR(st.st_mode))
+		fatal("`%s' is not valid temporary directory", cvs_tmpdir);
 
 	if (cvs_readrc == 1 && cvs_homedir != NULL) {
 		cvs_read_rcfile();
@@ -218,24 +269,7 @@ main(int argc, char **argv)
 
 	cvs_cmdop = cmdp->cmd_op;
 
-	cmd_argc = 0;
-	memset(cmd_argv, 0, sizeof(cmd_argv));
-
-	cmd_argv[cmd_argc++] = argv[0];
-	if (cmdp->cmd_defargs != NULL) {
-		/* transform into a new argument vector */
-		ret = cvs_getargv(cmdp->cmd_defargs, cmd_argv + 1,
-		    CVS_CMD_MAXARG - 1);
-		if (ret < 0)
-			fatal("main: cvs_getargv failed");
-
-		cmd_argc += ret;
-	}
-
-	if (argc + cmd_argc >= CVS_CMD_MAXARG)
-		fatal("main: too many arguments for `%s'", cmd_argv[0]);
-	for (ret = 1; ret < argc; ret++)
-		cmd_argv[cmd_argc++] = argv[ret];
+	cmd_argc = cvs_build_cmd(&cmd_argv, argv, argc);
 
 	cvs_file_init();
 
@@ -294,7 +328,7 @@ cvs_getopt(int argc, char **argv)
 	char *ep;
 	const char *errstr;
 
-	while ((ret = getopt(argc, argv, "b:d:e:flnQqRrs:T:tVvwxz:")) != -1) {
+	while ((ret = getopt(argc, argv, "b:d:e:flnQqRrs:T:tvwxz:")) != -1) {
 		switch (ret) {
 		case 'b':
 			/*
@@ -324,9 +358,8 @@ cvs_getopt(int argc, char **argv)
 			verbosity = 0;
 			break;
 		case 'q':
-			/*
-			 * Be quiet. This is the default in OpenCVS.
-			 */
+			if (verbosity > 1)
+				verbosity = 1;
 			break;
 		case 'R':
 			cvs_readonlyfs = 1;
@@ -350,11 +383,6 @@ cvs_getopt(int argc, char **argv)
 			break;
 		case 't':
 			cvs_trace = 1;
-			break;
-		case 'V':
-			/* don't override -Q */
-			if (verbosity)
-				verbosity = 2;
 			break;
 		case 'v':
 			printf("%s\n", CVS_VERSION);

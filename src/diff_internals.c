@@ -1,4 +1,4 @@
-/*	$OpenBSD: diff_internals.c,v 1.20 2008/03/08 11:53:36 joris Exp $	*/
+/*	$OpenBSD: diff_internals.c,v 1.25 2008/06/11 03:38:28 tobias Exp $	*/
 /*
  * Copyright (C) Caldera International Inc.  2001-2002.
  * All rights reserved.
@@ -69,11 +69,13 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <limits.h>
 #include <regex.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 #define _XOPEN_SOURCE 500
+#include <time.h>
 #include <unistd.h>
 
 #include "cvs.h"
@@ -202,7 +204,8 @@ static int context = 3;
 int diff_format = D_NORMAL;
 int diff_iflag = 0;
 int diff_pflag = 0;
-char *diff_file = NULL;
+const char *diff_file1 = NULL;
+const char *diff_file2 = NULL;
 RCSNUM *diff_rev1 = NULL;
 RCSNUM *diff_rev2 = NULL;
 char diffargs[128];
@@ -301,6 +304,8 @@ cvs_diffreg(const char *file1, const char *file2, int _fd1, int _fd2, BUF *out)
 	FILE *f1, *f2;
 	int i, rval, fd1, fd2;
 
+	diff_file1 = file1;
+	diff_file2 = file2;
 	f1 = f2 = NULL;
 	rval = D_SAME;
 	anychange = 0;
@@ -876,19 +881,19 @@ static void
 diff_head(void)
 {
 	char buf[64];
-	struct tm *t;
+	struct tm t;
 	time_t curr_time;
 
 	if (diff_rev1 != NULL) {
-		t = gmtime(&stb1.st_mtime);
+		gmtime_r(&stb1.st_mtime, &t);
 	} else {
 		time(&curr_time);
-		t = localtime(&curr_time);
+		localtime_r(&curr_time, &t);
 	}
 
-	(void)strftime(buf, sizeof(buf), "%b %G %H:%M:%S -0000", t);
+	(void)strftime(buf, sizeof(buf), "%b %G %H:%M:%S -0000", &t);
 	diff_output("%s %s	%d %s", diff_format == D_CONTEXT ?
-	    "***" : "---", diff_file, t->tm_mday, buf);
+	    "***" : "---", diff_file1, t.tm_mday, buf);
 
 	if (diff_rev1 != NULL) {
 		rcsnum_tostr(diff_rev1, buf, sizeof(buf));
@@ -897,11 +902,11 @@ diff_head(void)
 
 	diff_output("\n");
 
-	t = gmtime(&stb2.st_mtime);
+	gmtime_r(&stb2.st_mtime, &t);
 
-	(void)strftime(buf, sizeof(buf), "%b %G %H:%M:%S -0000", t);
+	(void)strftime(buf, sizeof(buf), "%b %G %H:%M:%S -0000", &t);
 	diff_output("%s %s	%d %s", diff_format == D_CONTEXT ?
-	    "---" : "+++", diff_file, t->tm_mday, buf);
+	    "---" : "+++", diff_file2, t.tm_mday, buf);
 
 	if (diff_rev2 != NULL) {
 		rcsnum_tostr(diff_rev2, buf, sizeof(buf));
@@ -915,40 +920,34 @@ static void
 rdiff_head(void)
 {
 	char buf[64];
-	struct tm *t;
+	struct tm t;
 	time_t curr_time;
-
-	if (diff_rev1 != NULL) {
-		t = localtime(&stb1.st_mtime);
-	} else {
-		time(&curr_time);
-		t = localtime(&curr_time);
-	}
 
 	diff_output("%s ", diff_format == D_CONTEXT ? "***" : "---");
 
 	if (diff_rev1 == NULL) {
 		diff_output("%s", CVS_PATH_DEVNULL);
-		t = gmtime(&stb1.st_atime);
+		gmtime_r(&stb1.st_atime, &t);
 	} else {
 		rcsnum_tostr(diff_rev1, buf, sizeof(buf));
-		diff_output("%s:%s", diff_file, buf);
+		diff_output("%s:%s", diff_file1, buf);
+		localtime_r(&stb1.st_mtime, &t);
 	}
 
-	(void)strftime(buf, sizeof(buf), "%a %b %e %H:%M:%S %G", t);
+	(void)strftime(buf, sizeof(buf), "%a %b %e %H:%M:%S %G", &t);
 	diff_output("\t%s\n", buf);
 
 	if (diff_rev2 != NULL) {
-		t = localtime(&stb2.st_mtime);
+		localtime_r(&stb2.st_mtime, &t);
 	} else {
 		time(&curr_time);
-		t = localtime(&curr_time);
+		localtime_r(&curr_time, &t);
 	}
 
-	(void)strftime(buf, sizeof(buf), "%a %b %e %H:%M:%S %G", t);
+	(void)strftime(buf, sizeof(buf), "%a %b %e %H:%M:%S %G", &t);
 
 	diff_output("%s %s	%s\n", diff_format == D_CONTEXT ? "---" : "+++",
-	    diff_file, buf);
+	    diff_file2, buf);
 }
 
 /*
@@ -1455,9 +1454,9 @@ diff_output(const char *fmt, ...)
 	i = vasprintf(&str, fmt, vap);
 	va_end(vap);
 	if (i == -1)
-		fatal("diff_output: %s", strerror(errno));
+		fatal("diff_output: could not allocate memory");
 	if (diffbuf != NULL)
-		cvs_buf_append(diffbuf, str, strlen(str));
+		cvs_buf_puts(diffbuf, str);
 	else
 		cvs_printf("%s", str);
 	xfree(str);

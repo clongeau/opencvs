@@ -1,4 +1,4 @@
-/*	$OpenBSD: import.c,v 1.87 2008/03/01 20:49:44 joris Exp $	*/
+/*	$OpenBSD: import.c,v 1.97 2008/06/15 04:21:26 joris Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -28,19 +28,25 @@
 
 void	cvs_import_local(struct cvs_file *);
 
+static void import_loginfo(char *);
 static void import_new(struct cvs_file *);
+static void import_printf(const char *, ...);
 static void import_update(struct cvs_file *);
 static void import_tag(struct cvs_file *, RCSNUM *, RCSNUM *);
 static BUF *import_get_rcsdiff(struct cvs_file *, RCSNUM *);
 
 #define IMPORT_DEFAULT_BRANCH	"1.1.1"
 
+extern char *loginfo;
+extern char *logmsg;
+
 static char *import_branch = IMPORT_DEFAULT_BRANCH;
-static char *logmsg = NULL;
 static char *vendor_tag = NULL;
-static char *release_tag = NULL;
+static char **release_tags;
 static char *koptstr;
 static int dflag = 0;
+static int tagcount = 0;
+static BUF *logbuf;
 
 char *import_repository = NULL;
 int import_conflicts = 0;
@@ -59,9 +65,10 @@ struct cvs_cmd cvs_cmd_import = {
 int
 cvs_import(int argc, char **argv)
 {
-	int ch;
+	int i, ch;
 	char repo[MAXPATHLEN], *arg = ".";
 	struct cvs_recursion cr;
+	struct trigger_list *line_list;
 
 	while ((ch = getopt(argc, argv, cvs_cmd_import.cmd_opts)) != -1) {
 		switch (ch) {
@@ -76,7 +83,7 @@ cvs_import(int argc, char **argv)
 			kflag = rcs_kflag_get(koptstr);
 			if (RCS_KWEXP_INVAL(kflag)) {
 				cvs_log(LP_ERR,
-				    "invalid RCS keyword expension mode");
+				    "invalid RCS keyword expansion mode");
 				fatal("%s", cvs_cmd_import.cmd_synopsis);
 			}
 			break;
@@ -95,15 +102,28 @@ cvs_import(int argc, char **argv)
 	if (argc < 3)
 		fatal("%s", cvs_cmd_import.cmd_synopsis);
 
-	if (logmsg == NULL)
-		logmsg = cvs_logmsg_create(NULL, NULL, NULL);
-
-	if (logmsg == NULL)
-		fatal("This shouldnt happen, honestly!");
-
 	import_repository = argv[0];
 	vendor_tag = argv[1];
-	release_tag = argv[2];
+	argc -= 2;
+	argv += 2;
+
+	release_tags = argv;
+	tagcount = argc;
+
+	if (!rcs_sym_check(vendor_tag))
+		fatal("invalid symbol: %s", vendor_tag);
+
+	for (i = 0; i < tagcount; i++) {
+		if (!rcs_sym_check(release_tags[i]))
+			fatal("invalid symbol: %s", release_tags[i]);
+	}
+
+	if (logmsg == NULL) {
+		if (cvs_server_active)
+			fatal("no log message specified");
+		else
+			logmsg = cvs_logmsg_create(NULL, NULL, NULL, NULL);
+	}
 
 	if (current_cvsroot->cr_method != CVS_METHOD_LOCAL) {
 		cvs_client_connect_to_server();
@@ -116,7 +136,8 @@ cvs_import(int argc, char **argv)
 		cvs_client_send_logmsg(logmsg);
 		cvs_client_send_request("Argument %s", import_repository);
 		cvs_client_send_request("Argument %s", vendor_tag);
-		cvs_client_send_request("Argument %s", release_tag);
+		for (i = 0; i < tagcount; i++)
+			cvs_client_send_request("Argument %s", release_tags[i]);
 
 		cr.enterdir = NULL;
 		cr.leavedir = NULL;
@@ -131,8 +152,13 @@ cvs_import(int argc, char **argv)
 		return (0);
 	}
 
+	if (cvs_logmsg_verify(logmsg))
+		return (0);
+
 	(void)xsnprintf(repo, sizeof(repo), "%s/%s",
 	    current_cvsroot->cr_dir, import_repository);
+
+	import_loginfo(import_repository);
 
 	if (cvs_noexec != 1) {
 		if (mkdir(repo, 0755) == -1 && errno != EEXIST)
@@ -146,17 +172,43 @@ cvs_import(int argc, char **argv)
 	cvs_file_run(1, &arg, &cr);
 
 	if (import_conflicts != 0) {
-		cvs_printf("\n%d conflicts created by this import.\n\n",
+		import_printf("\n%d conflicts created by this import.\n\n",
 		    import_conflicts);
-		cvs_printf("Use the following command to help the merge:\n");
-		cvs_printf("\topencvs checkout ");
-		cvs_printf("-j%s:yesterday -j%s %s\n\n", vendor_tag,
+		import_printf("Use the following command to help the merge:\n");
+		import_printf("\topencvs checkout ");
+		import_printf("-j%s:yesterday -j%s %s\n\n", vendor_tag,
 		    vendor_tag, import_repository);
 	} else {
-		cvs_printf("\nNo conflicts created by this import.\n\n");
+		import_printf("\nNo conflicts created by this import.\n\n");
 	}
 
+	loginfo = cvs_buf_release(logbuf);
+	logbuf = NULL;
+
+	line_list = cvs_trigger_getlines(CVS_PATH_LOGINFO, import_repository);
+	if (line_list != NULL) {
+		cvs_trigger_handle(CVS_TRIGGER_LOGINFO, import_repository,
+		    loginfo, line_list, NULL);
+		cvs_trigger_freelist(line_list);
+	}
+
+	xfree(loginfo);
 	return (0);
+}
+
+static void
+import_printf(const char *fmt, ...)
+{
+	char *str;
+	va_list vap;
+
+	va_start(vap, fmt);
+	if (vasprintf(&str, fmt, vap) == -1)
+		fatal("import_printf: could not allocate memory");
+	va_end(vap);
+
+	cvs_printf("%s", str);
+	cvs_buf_puts(logbuf, str);
 }
 
 void
@@ -202,9 +254,45 @@ cvs_import_local(struct cvs_file *cf)
 }
 
 static void
+import_loginfo(char *repo)
+{
+	int i;
+	char pwd[MAXPATHLEN];
+
+	if (getcwd(pwd, sizeof(pwd)) == NULL)
+		fatal("Can't get working directory");
+
+	logbuf = cvs_buf_alloc(1024);
+	cvs_trigger_loginfo_header(logbuf, repo);
+
+	cvs_buf_puts(logbuf, "Log Message:\n");
+	cvs_buf_puts(logbuf, logmsg);
+	if (logmsg[0] != '\0' && logmsg[strlen(logmsg) - 1] != '\n')
+		cvs_buf_putc(logbuf, '\n');
+	cvs_buf_putc(logbuf, '\n');
+
+	cvs_buf_puts(logbuf, "Status:\n\n");
+
+	cvs_buf_puts(logbuf, "Vendor Tag:\t");
+	cvs_buf_puts(logbuf, vendor_tag);
+	cvs_buf_putc(logbuf, '\n');
+	cvs_buf_puts(logbuf, "Release Tags:\t");
+
+	for (i = 0; i < tagcount ; i++) {
+		cvs_buf_puts(logbuf, "\t\t");
+		cvs_buf_puts(logbuf, release_tags[i]);
+		cvs_buf_putc(logbuf, '\n');
+	}
+	cvs_buf_putc(logbuf, '\n');
+	cvs_buf_putc(logbuf, '\n');
+}
+
+static void
 import_new(struct cvs_file *cf)
 {
+	int i;
 	BUF *bp;
+	mode_t mode;
 	time_t tstamp;
 	struct stat st;
 	struct rcs_branch *brp;
@@ -216,16 +304,17 @@ import_new(struct cvs_file *cf)
 	cvs_log(LP_TRACE, "import_new(%s)", cf->file_name);
 
 	if (cvs_noexec == 1) {
-		cvs_printf("N %s/%s\n", import_repository, cf->file_path);
+		import_printf("N %s/%s\n", import_repository, cf->file_path);
 		return;
 	}
 
-	if (dflag == 1) {
-		if (fstat(cf->fd, &st) == -1)
-			fatal("import_new: %s", strerror(errno));
+	if (fstat(cf->fd, &st) == -1)
+		fatal("import_new: %s", strerror(errno));
 
+	mode = st.st_mode;
+
+	if (dflag == 1)
 		tstamp = st.st_mtime;
-	}
 
 	if ((branch = rcsnum_parse(import_branch)) == NULL)
 		fatal("import_new: failed to parse branch");
@@ -235,11 +324,12 @@ import_new(struct cvs_file *cf)
 	if ((brev = rcsnum_brtorev(branch)) == NULL)
 		fatal("import_new: failed to get first branch revision");
 
-	cf->repo_fd = open(cf->file_rpath, O_CREAT|O_TRUNC|O_WRONLY);
+	cf->repo_fd = open(cf->file_rpath, O_CREAT | O_RDONLY);
 	if (cf->repo_fd < 0)
 		fatal("import_new: %s: %s", cf->file_rpath, strerror(errno));
 
-	cf->file_rcs = rcs_open(cf->file_rpath, cf->repo_fd, RCS_CREATE, 0444);
+	cf->file_rcs = rcs_open(cf->file_rpath, cf->repo_fd, RCS_CREATE,
+	    (mode & ~(S_IWUSR | S_IWGRP | S_IWOTH)));
 	if (cf->file_rcs == NULL)
 		fatal("import_new: failed to create RCS file for %s",
 		    cf->file_path);
@@ -247,10 +337,12 @@ import_new(struct cvs_file *cf)
 	rcs_branch_set(cf->file_rcs, branch);
 
 	if (rcs_sym_add(cf->file_rcs, vendor_tag, branch) == -1)
-		fatal("import_new: failed to add release tag");
-
-	if (rcs_sym_add(cf->file_rcs, release_tag, brev) == -1)
 		fatal("import_new: failed to add vendor tag");
+
+	for (i = 0; i < tagcount; i++) {
+		if (rcs_sym_add(cf->file_rcs, release_tags[i], brev) == -1)
+			fatal("import_new: failed to add release tag");
+	}
 
 	if (rcs_rev_add(cf->file_rcs, brev, logmsg, tstamp, NULL) == -1)
 		fatal("import_new: failed to create first branch revision");
@@ -275,7 +367,7 @@ import_new(struct cvs_file *cf)
 		rcs_kwexp_set(cf->file_rcs, kflag);
 
 	rcs_write(cf->file_rcs);
-	cvs_printf("N %s/%s\n", import_repository, cf->file_path);
+	import_printf("N %s/%s\n", import_repository, cf->file_path);
 
 	rcsnum_free(branch);
 	rcsnum_free(brev);
@@ -290,6 +382,9 @@ import_update(struct cvs_file *cf)
 	RCSNUM *newrev, *rev, *brev;
 
 	cvs_log(LP_TRACE, "import_update(%s)", cf->file_path);
+
+	if (cf->file_rcs->rf_head == NULL)
+		fatal("no head revision in RCS file for `%s'", cf->file_path);
 
 	if ((rev = rcs_translate_tag(import_branch, cf->file_rcs)) == NULL)
 		fatal("import_update: could not translate tag `%s'",
@@ -309,7 +404,7 @@ import_update(struct cvs_file *cf)
 		rcsnum_free(brev);
 		if (cvs_noexec != 1)
 			rcs_write(cf->file_rcs);
-		cvs_printf("U %s/%s\n", import_repository, cf->file_path);
+		import_printf("U %s/%s\n", import_repository, cf->file_path);
 		return;
 	}
 
@@ -319,9 +414,9 @@ import_update(struct cvs_file *cf)
 	if (cf->file_rcs->rf_branch == NULL || cf->in_attic == 1 ||
 	    strcmp(branch, import_branch)) {
 		import_conflicts++;
-		cvs_printf("C %s/%s\n", import_repository, cf->file_path);
+		import_printf("C %s/%s\n", import_repository, cf->file_path);
 	} else {
-		cvs_printf("U %s/%s\n", import_repository, cf->file_path);
+		import_printf("U %s/%s\n", import_repository, cf->file_path);
 	}
 
 	if (cvs_noexec == 1)
@@ -348,14 +443,13 @@ import_update(struct cvs_file *cf)
 static void
 import_tag(struct cvs_file *cf, RCSNUM *branch, RCSNUM *newrev)
 {
-	char b[CVS_REV_BUFSZ];
+	int i;
 
 	if (cvs_noexec != 1) {
-		rcsnum_tostr(branch, b, sizeof(b));
 		rcs_sym_add(cf->file_rcs, vendor_tag, branch);
 
-		rcsnum_tostr(newrev, b, sizeof(b));
-		rcs_sym_add(cf->file_rcs, release_tag, newrev);
+		for (i = 0; i < tagcount; i++)
+			rcs_sym_add(cf->file_rcs, release_tags[i], newrev);
 	}
 }
 

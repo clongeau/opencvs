@@ -8,8 +8,28 @@ AC_PROG_INSTALL
 AC_PROG_LIBTOOL
 AC_PROG_LN_S
 
+
+# special check for Solaris
+# stolen from vlc's configure.ac
+case "${host_os}" in
+  solaris*)
+    SYS=solaris
+    # _POSIX_PTHREAD_SEMANTICS is needed to get the POSIX ctime_r
+    # Perhaps it is useful other places as well? 
+    CFLAGS_save="${CFLAGS_save} -D_POSIX_PTHREAD_SEMANTICS"; CFLAGS="${CFLAGS_save}"
+    ;;
+esac
+
 AC_CHECK_HEADERS([sys/dirent.h dirent.h sys/time.h utimes.h])
-AC_CHECK_FUNCS([fgetln strlcat strlcpy strtonum getdirentries getdents])
+AC_CHECK_FUNCS([ \
+		fgetln \
+		getdents \
+		getdirentries \
+		getopt \
+		strlcat \
+		strlcpy \
+		strtonum \
+		])
 
 #comes from sudo's configure.in
 AC_CHECK_FUNCS(utimes, [AC_CHECK_FUNCS(futimes futimesat, [break])], [AC_CHECK_FUNCS(futime) AC_LIBOBJ(utimes)])
@@ -44,6 +64,10 @@ if test "$GCC" = "yes" || test "$GCC" = "egcs"; then
 		    [#include <limits.h>]
 		)
 	fi
+fi
+
+if test "x$no_attrib_nonnull" != "x1" ; then
+	AC_DEFINE(HAVE_ATTRIBUTE__NONNULL__, 1, [Have attribute nonnull])
 fi
 
 
@@ -145,6 +169,187 @@ int main(void) {
 	)
 fi
 
+# More checks for data types
+AC_CACHE_CHECK([for u_int type], ac_cv_have_u_int, [
+	AC_TRY_COMPILE(
+		[ #include <sys/types.h> ],
+		[ u_int a; a = 1;],
+		[ ac_cv_have_u_int="yes" ],
+		[ ac_cv_have_u_int="no" ]
+	)
+])
+if test "x$ac_cv_have_u_int" = "xyes" ; then
+	AC_DEFINE(HAVE_U_INT, 1, [define if you have u_int data type])
+	have_u_int=1
+fi
+
+AC_CACHE_CHECK([for intXX_t types], ac_cv_have_intxx_t, [
+	AC_TRY_COMPILE(
+		[ #include <sys/types.h> ],
+		[ int8_t a; int16_t b; int32_t c; a = b = c = 1;],
+		[ ac_cv_have_intxx_t="yes" ],
+		[ ac_cv_have_intxx_t="no" ]
+	)
+])
+if test "x$ac_cv_have_intxx_t" = "xyes" ; then
+	AC_DEFINE(HAVE_INTXX_T, 1, [define if you have intxx_t data type])
+	have_intxx_t=1
+fi
+
+if (test -z "$have_intxx_t" && \
+	   test "x$ac_cv_header_stdint_h" = "xyes")
+then
+    AC_MSG_CHECKING([for intXX_t types in stdint.h])
+	AC_TRY_COMPILE(
+		[ #include <stdint.h> ],
+		[ int8_t a; int16_t b; int32_t c; a = b = c = 1;],
+		[
+			AC_DEFINE(HAVE_INTXX_T)
+			AC_MSG_RESULT(yes)
+		],
+		[ AC_MSG_RESULT(no) ]
+	)
+fi
+
+AC_CACHE_CHECK([for int64_t type], ac_cv_have_int64_t, [
+	AC_TRY_COMPILE(
+		[
+#include <sys/types.h>
+#ifdef HAVE_STDINT_H
+# include <stdint.h>
+#endif
+#include <sys/socket.h>
+#ifdef HAVE_SYS_BITYPES_H
+# include <sys/bitypes.h>
+#endif
+		],
+		[ int64_t a; a = 1;],
+		[ ac_cv_have_int64_t="yes" ],
+		[ ac_cv_have_int64_t="no" ]
+	)
+])
+if test "x$ac_cv_have_int64_t" = "xyes" ; then
+	AC_DEFINE(HAVE_INT64_T, 1, [define if you have int64_t data type])
+fi
+
+AC_CACHE_CHECK([for u_intXX_t types], ac_cv_have_u_intxx_t, [
+	AC_TRY_COMPILE(
+		[ #include <sys/types.h> ],
+		[ u_int8_t a; u_int16_t b; u_int32_t c; a = b = c = 1;],
+		[ ac_cv_have_u_intxx_t="yes" ],
+		[ ac_cv_have_u_intxx_t="no" ]
+	)
+])
+if test "x$ac_cv_have_u_intxx_t" = "xyes" ; then
+	AC_DEFINE(HAVE_U_INTXX_T, 1, [define if you have u_intxx_t data type])
+	have_u_intxx_t=1
+fi
+
+if test -z "$have_u_intxx_t" ; then
+    AC_MSG_CHECKING([for u_intXX_t types in sys/socket.h])
+	AC_TRY_COMPILE(
+		[ #include <sys/socket.h> ],
+		[ u_int8_t a; u_int16_t b; u_int32_t c; a = b = c = 1;],
+		[
+			AC_DEFINE(HAVE_U_INTXX_T)
+			AC_MSG_RESULT(yes)
+		],
+		[ AC_MSG_RESULT(no) ]
+	)
+fi
+
+AC_CACHE_CHECK([for u_int64_t types], ac_cv_have_u_int64_t, [
+	AC_TRY_COMPILE(
+		[ #include <sys/types.h> ],
+		[ u_int64_t a; a = 1;],
+		[ ac_cv_have_u_int64_t="yes" ],
+		[ ac_cv_have_u_int64_t="no" ]
+	)
+])
+if test "x$ac_cv_have_u_int64_t" = "xyes" ; then
+	AC_DEFINE(HAVE_U_INT64_T, 1, [define if you have u_int64_t data type])
+	have_u_int64_t=1
+fi
+
+if test -z "$have_u_int64_t" ; then
+    AC_MSG_CHECKING([for u_int64_t type in sys/bitypes.h])
+	AC_TRY_COMPILE(
+		[ #include <sys/bitypes.h> ],
+		[ u_int64_t a; a = 1],
+		[
+			AC_DEFINE(HAVE_U_INT64_T)
+			AC_MSG_RESULT(yes)
+		],
+		[ AC_MSG_RESULT(no) ]
+	)
+fi
+
+if test -z "$have_u_intxx_t" ; then
+	AC_CACHE_CHECK([for uintXX_t types], ac_cv_have_uintxx_t, [
+		AC_TRY_COMPILE(
+			[
+#include <sys/types.h>
+			],
+			[ uint8_t a; uint16_t b; uint32_t c; a = b = c = 1; ],
+			[ ac_cv_have_uintxx_t="yes" ],
+			[ ac_cv_have_uintxx_t="no" ]
+		)
+	])
+	if test "x$ac_cv_have_uintxx_t" = "xyes" ; then
+		AC_DEFINE(HAVE_UINTXX_T, 1,
+			[define if you have uintxx_t data type])
+	fi
+fi
+
+if test -z "$have_uintxx_t" ; then
+    AC_MSG_CHECKING([for uintXX_t types in stdint.h])
+	AC_TRY_COMPILE(
+		[ #include <stdint.h> ],
+		[ uint8_t a; uint16_t b; uint32_t c; a = b = c = 1;],
+		[
+			AC_DEFINE(HAVE_UINTXX_T)
+			AC_MSG_RESULT(yes)
+		],
+		[ AC_MSG_RESULT(no) ]
+	)
+fi
+
+if (test -z "$have_u_intxx_t" || test -z "$have_intxx_t" && \
+	   test "x$ac_cv_header_sys_bitypes_h" = "xyes")
+then
+	AC_MSG_CHECKING([for intXX_t and u_intXX_t types in sys/bitypes.h])
+	AC_TRY_COMPILE(
+		[
+#include <sys/bitypes.h>
+		],
+		[
+			int8_t a; int16_t b; int32_t c;
+			u_int8_t e; u_int16_t f; u_int32_t g;
+			a = b = c = e = f = g = 1;
+		],
+		[
+			AC_DEFINE(HAVE_U_INTXX_T)
+			AC_DEFINE(HAVE_INTXX_T)
+			AC_MSG_RESULT(yes)
+		],
+		[AC_MSG_RESULT(no)]
+	)
+fi
+
+
+AC_CACHE_CHECK([for u_char], ac_cv_have_u_char, [
+	AC_TRY_COMPILE(
+		[
+#include <sys/types.h>
+		],
+		[ u_char foo; foo = 125; ],
+		[ ac_cv_have_u_char="yes" ],
+		[ ac_cv_have_u_char="no" ]
+	)
+])
+if test "x$ac_cv_have_u_char" = "xyes" ; then
+	AC_DEFINE(HAVE_U_CHAR, 1, [define if you have u_char data type])
+fi
 dnl IRIX and Solaris 2.5.1 have dirname() in libgen
 AC_CHECK_FUNCS(dirname, [AC_CHECK_HEADERS(libgen.h)] ,[
 	AC_CHECK_LIB(gen, dirname,[
@@ -182,6 +387,78 @@ int main(int argc, char **argv) {
 		fi
 	])
 ])
+
+
+AC_CACHE_CHECK([for size_t], ac_cv_have_size_t, [
+	AC_TRY_COMPILE(
+		[
+#include <sys/types.h>
+		],
+		[ size_t foo; foo = 1235; ],
+		[ ac_cv_have_size_t="yes" ],
+		[ ac_cv_have_size_t="no" ]
+	)
+])
+if test "x$ac_cv_have_size_t" = "xyes" ; then
+	AC_DEFINE(HAVE_SIZE_T, 1, [define if you have size_t data type])
+fi
+
+AC_CACHE_CHECK([for ssize_t], ac_cv_have_ssize_t, [
+	AC_TRY_COMPILE(
+		[
+#include <sys/types.h>
+		],
+		[ ssize_t foo; foo = 1235; ],
+		[ ac_cv_have_ssize_t="yes" ],
+		[ ac_cv_have_ssize_t="no" ]
+	)
+])
+if test "x$ac_cv_have_ssize_t" = "xyes" ; then
+	AC_DEFINE(HAVE_SSIZE_T, 1, [define if you have ssize_t data type])
+fi
+
+AC_CACHE_CHECK([for sa_family_t], ac_cv_have_sa_family_t, [
+	AC_TRY_COMPILE(
+		[
+#include <sys/types.h>
+#include <sys/socket.h>
+		],
+		[ sa_family_t foo; foo = 1235; ],
+		[ ac_cv_have_sa_family_t="yes" ],
+		[ AC_TRY_COMPILE(
+		  [
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+		],
+		[ sa_family_t foo; foo = 1235; ],
+		[ ac_cv_have_sa_family_t="yes" ],
+
+		[ ac_cv_have_sa_family_t="no" ]
+	)]
+	)
+])
+if test "x$ac_cv_have_sa_family_t" = "xyes" ; then
+	AC_DEFINE(HAVE_SA_FAMILY_T, 1,
+		[define if you have sa_family_t data type])
+fi
+
+
+AC_CACHE_CHECK([for mode_t], ac_cv_have_mode_t, [
+	AC_TRY_COMPILE(
+		[
+#include <sys/types.h>
+		],
+		[ mode_t foo; foo = 1235; ],
+		[ ac_cv_have_mode_t="yes" ],
+		[ ac_cv_have_mode_t="no" ]
+	)
+])
+if test "x$ac_cv_have_mode_t" = "xyes" ; then
+	AC_DEFINE(HAVE_MODE_T, 1, [define if you have mode_t data type])
+fi
+
+
 
 AC_SEARCH_LIBS(basename, gen, AC_DEFINE(HAVE_BASENAME, 1,
 	[Define if you have the basename function.]))

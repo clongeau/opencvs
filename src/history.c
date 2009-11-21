@@ -1,4 +1,4 @@
-/*	$OpenBSD: history.c,v 1.35 2008/01/31 10:15:05 tobias Exp $	*/
+/*	$OpenBSD: history.c,v 1.39 2008/06/19 19:03:25 tobias Exp $	*/
 /*
  * Copyright (c) 2007 Joris Vink <joris@openbsd.org>
  *
@@ -19,6 +19,7 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <pwd.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,6 +29,8 @@
 #include "remote.h"
 
 void	cvs_history_local(struct cvs_file *);
+
+static void	history_compress(char *, const char *);
 
 struct cvs_cmd		cvs_cmd_history = {
 	CVS_OP_HISTORY, CVS_USE_WDIR, "history",
@@ -61,9 +64,15 @@ const char historytab[] = {
 void
 cvs_history_add(int type, struct cvs_file *cf, const char *argument)
 {
+	BUF *buf;
 	FILE *fp;
-	char *cwd;
+	RCSNUM *hrev;
+	size_t len;
+	int fd;
+	char *cwd, *p, *rev;
 	char revbuf[CVS_REV_BUFSZ], repo[MAXPATHLEN], fpath[MAXPATHLEN];
+	char timebuf[CVS_TIME_BUFSZ];
+	struct tm datetm;
 
 	if (cvs_nolog == 1)
 		return;
@@ -77,58 +86,133 @@ cvs_history_add(int type, struct cvs_file *cf, const char *argument)
 	cvs_log(LP_TRACE, "cvs_history_add(`%c', `%s', `%s')",
 	    historytab[type], (cf != NULL) ? cf->file_name : "", argument);
 
+	/* construct repository field */
+	if (cvs_cmdop != CVS_OP_CHECKOUT && cvs_cmdop != CVS_OP_EXPORT) {
+		cvs_get_repository_name((cf != NULL) ? cf->file_wd : ".",
+		    repo, sizeof(repo));
+	} else {
+		cvs_get_repository_name(argument, repo, sizeof(repo));
+	}
+
 	if (cvs_server_active == 1) {
 		cwd = "<remote>";
 	} else {
-		if ((cwd = getcwd(NULL, MAXPATHLEN)) == NULL)
+		if (getcwd(fpath, sizeof(fpath)) == NULL)
 			fatal("cvs_history_add: getcwd: %s", strerror(errno));
-	}
+		p = fpath;
+		if (cvs_cmdop == CVS_OP_CHECKOUT ||
+		    cvs_cmdop == CVS_OP_EXPORT) {
+			if (strlcat(fpath, "/", sizeof(fpath)) >=
+			    sizeof(fpath) || strlcat(fpath, argument,
+			    sizeof(fpath)) >= sizeof(fpath))
+				fatal("cvs_history_add: string truncation");
+		}
+		if (cvs_homedir != NULL && cvs_homedir[0] != '\0') {
+			len = strlen(cvs_homedir);
+			if (strncmp(cvs_homedir, fpath, len) == 0 &&
+			    fpath[len] == '/') {
+				p += len - 1;
+				*p = '~';
+			}
+		}
 
-	/* construct repository field */
-	if (cvs_cmdop != CVS_OP_CHECKOUT && cvs_cmdop != CVS_OP_EXPORT) {
-		cvs_get_repository_name(".", repo, sizeof(repo));
-	} else {
-		strlcpy(repo, argument, sizeof(repo));
+		history_compress(p, repo);
+		cwd = xstrdup(p);
 	}
 
 	/* construct revision field */
 	revbuf[0] = '\0';
-	if (cvs_cmdop != CVS_OP_CHECKOUT && cvs_cmdop != CVS_OP_EXPORT) {
-		switch (type) {
-		case CVS_HISTORY_TAG:
-			strlcpy(revbuf, argument, sizeof(revbuf));
-			break;
-		case CVS_HISTORY_CHECKOUT:
-		case CVS_HISTORY_EXPORT:
-			/* copy TAG or DATE to revbuf */
-			break;
-		case CVS_HISTORY_UPDATE_MERGED:
-		case CVS_HISTORY_UPDATE_MERGED_ERR:
-		case CVS_HISTORY_COMMIT_MODIFIED:
-		case CVS_HISTORY_COMMIT_ADDED:
-		case CVS_HISTORY_COMMIT_REMOVED:
-		case CVS_HISTORY_UPDATE_CO:
-			rcsnum_tostr(cf->file_rcs->rf_head,
-			    revbuf, sizeof(revbuf));
-			break;
+	rev = revbuf;
+	switch (type) {
+	case CVS_HISTORY_TAG:
+		strlcpy(revbuf, argument, sizeof(revbuf));
+		break;
+	case CVS_HISTORY_CHECKOUT:
+	case CVS_HISTORY_EXPORT:
+		/*
+		 * cvs_buf_alloc uses xcalloc(), so we are safe even
+		 * if neither cvs_specified_tag nor cvs_specified_date
+		 * have been supplied.
+		 */
+		buf = cvs_buf_alloc(128);
+		if (cvs_specified_tag != NULL) {
+			cvs_buf_puts(buf, cvs_specified_tag);
+			if (cvs_specified_date != -1)
+				cvs_buf_putc(buf, ':');
 		}
+		if (cvs_specified_date != -1) {
+			gmtime_r(&cvs_specified_date, &datetm);
+			strftime(timebuf, sizeof(timebuf),
+			    "%Y.%m.%d.%H.%M.%S", &datetm);
+			cvs_buf_puts(buf, timebuf);
+		}
+		rev = cvs_buf_release(buf);
+		break;
+	case CVS_HISTORY_UPDATE_MERGED:
+	case CVS_HISTORY_UPDATE_MERGED_ERR:
+	case CVS_HISTORY_COMMIT_MODIFIED:
+	case CVS_HISTORY_COMMIT_ADDED:
+	case CVS_HISTORY_COMMIT_REMOVED:
+	case CVS_HISTORY_UPDATE_CO:
+		if ((hrev = rcs_head_get(cf->file_rcs)) == NULL)
+			fatal("cvs_history_add: rcs_head_get failed");
+		rcsnum_tostr(hrev, revbuf, sizeof(revbuf));
+		rcsnum_free(hrev);
+		break;
 	}
 
 	(void)xsnprintf(fpath, sizeof(fpath), "%s/%s",
 	    current_cvsroot->cr_dir, CVS_PATH_HISTORY);
 
-	if ((fp = fopen(fpath, "a")) != NULL) {
-		fprintf(fp, "%c%x|%s|%s|%s|%s|%s\n",
-		    historytab[type], time(NULL), getlogin(), cwd, repo,
-		    revbuf, (cf != NULL) ? cf->file_name : argument);
-
-		(void)fclose(fp);
+	if ((fd = open(fpath, O_WRONLY|O_APPEND)) == -1) {
+		if (errno != ENOENT)
+			cvs_log(LP_ERR, "failed to open history file");
 	} else {
-		cvs_log(LP_ERR, "failed to add entry to history file");
+		if ((fp = fdopen(fd, "a")) != NULL) {
+			fprintf(fp, "%c%x|%s|%s|%s|%s|%s\n",
+			    historytab[type], time(NULL), getlogin(), cwd,
+			    repo, rev, (cf != NULL) ? cf->file_name :
+			    argument);
+			(void)fclose(fp);
+		} else {
+			cvs_log(LP_ERR, "failed to add entry to history file");
+			(void)close(fd);
+		}
 	}
 
+	if (rev != revbuf)
+		xfree(rev);
 	if (cvs_server_active != 1)
 		xfree(cwd);
+}
+
+static void
+history_compress(char *wdir, const char *repo)
+{
+	char *p;
+	const char *q;
+	size_t repo_len, wdir_len;
+
+	repo_len = strlen(repo);
+	wdir_len = strlen(wdir);
+
+	p = wdir + wdir_len;
+	q = repo + repo_len;
+
+	while (p >= wdir && q >= repo) {
+		if (*p != *q)
+			break;
+		p--;
+		q--;
+	}
+	p++;
+	q++;
+
+	/* if it's not worth the effort, skip compression */
+	if (repo + repo_len - q < 3)
+		return;
+
+	(void)xsnprintf(p, strlen(p) + 1, "*%zx", q - repo);
 }
 
 int

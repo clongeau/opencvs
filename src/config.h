@@ -50,7 +50,13 @@ struct module_checkout {
 	struct cvs_flisthead	 mc_ignores;
 };
 
-struct module_info {
+/*
+ * On solaris module_info is defined in /usr/include/sys/stream.h
+ * 1/ rename it to cvs_module_info
+ * 2/ add a define to map existing module_info to cvs_modul_info
+ */
+
+struct cvs_module_info {
 	char				*mi_name;
 	char				*mi_prog;
 	char				*mi_str;
@@ -61,6 +67,8 @@ struct module_info {
 
 	TAILQ_ENTRY(module_info)	 m_list;
 };
+
+#define module_info cvs_module_info
 
 struct module_checkout *cvs_module_lookup(char *);
 #endif

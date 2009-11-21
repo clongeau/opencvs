@@ -1,4 +1,4 @@
-/*	$OpenBSD: edit.c,v 1.45 2008/03/01 21:29:36 deraadt Exp $	*/
+/*	$OpenBSD: edit.c,v 1.47 2008/06/14 03:19:15 joris Exp $	*/
 /*
  * Copyright (c) 2006, 2007 Xavier Santolaria <xsa@openbsd.org>
  *
@@ -18,7 +18,9 @@
 #include <sys/stat.h>
 
 #include <errno.h>
+#include <netdb.h> /* On Solaris MAXHOSTNAMELEN is defined here */
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "cvs.h"
@@ -257,7 +259,7 @@ static void
 cvs_edit_local(struct cvs_file *cf)
 {
 	FILE *fp;
-	struct tm *t;
+	struct tm t;
 	time_t now;
 	char timebuf[CVS_TIME_BUFSZ], thishost[MAXHOSTNAMELEN];
 	char bfpath[MAXPATHLEN], wdir[MAXPATHLEN];
@@ -274,10 +276,8 @@ cvs_edit_local(struct cvs_file *cf)
 		    CVS_PATH_NOTIFY, strerror(errno));
 
 	(void)time(&now);
-	if ((t = gmtime(&now)) == NULL)
-		fatal("gmtime failed");
-
-	asctime_r(t, timebuf);
+	gmtime_r(&now, &t);
+	asctime_r(&t, timebuf);
 	timebuf[strcspn(timebuf, "\n")] = '\0';
 
 	if (gethostname(thishost, sizeof(thishost)) == -1)
@@ -326,7 +326,7 @@ cvs_unedit_local(struct cvs_file *cf)
 {
 	FILE *fp;
 	struct stat st;
-	struct tm *t;
+	struct tm t;
 	time_t now;
 	char bfpath[MAXPATHLEN], timebuf[64], thishost[MAXHOSTNAMELEN];
 	char wdir[MAXPATHLEN], sticky[CVS_ENT_MAXLINELEN];
@@ -360,10 +360,8 @@ cvs_unedit_local(struct cvs_file *cf)
 		    CVS_PATH_NOTIFY, strerror(errno));
 
 	(void)time(&now);
-	if ((t = gmtime(&now)) == NULL)
-		fatal("gmtime failed");
-
-	asctime_r(t, timebuf);
+	gmtime_r(&now, &t);
+	asctime_r(&t, timebuf);
 	timebuf[strcspn(timebuf, "\n")] = '\0';
 
 	if (gethostname(thishost, sizeof(thishost)) == -1)
@@ -411,7 +409,6 @@ cvs_unedit_local(struct cvs_file *cf)
 		cvs_ent_add(entlist, entry);
 
 		cvs_ent_free(ent);
-		cvs_ent_close(entlist, ENT_SYNC);
 
 		xfree(entry);
 	}

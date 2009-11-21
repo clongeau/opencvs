@@ -29,6 +29,7 @@
 #include <time.h>
 
 #include "buf.h"
+#include "compat.h"
 
 #define RCS_DIFF_MAXARG		32
 #define RCS_DIFF_DIV \

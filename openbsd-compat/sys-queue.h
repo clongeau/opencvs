@@ -34,8 +34,6 @@
 
 /* OPENBSD ORIGINAL: sys/sys/queue.h */
 
-#include "config.h"
-
 #ifndef	_FAKE_QUEUE_H_
 #define	_FAKE_QUEUE_H_
 

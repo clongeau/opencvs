@@ -1,3 +1,18 @@
+2008-07-10  chl  <chl@tuxfamily.org>
+
+	- deal with missing err.h header, and associated functions
+	(err{,x}() and warn{,x}()i) on Solaris. Taken from sudo. (reported by
+	Mike Belopuhov and Elias Pipping).
+	- deal with missing FNM_CASEFOLD flag for fnmatch on Solaris (reported
+	by Mike Belopuhov).
+	- find a missing #include "defines.h" for rcs.h file (reported by Mike
+	Belopuhov).
+	- deal with missing MAP_FILE on Solaris (reported by Mike Belopuhov).
+	- deal with missing MAXNAMLEN on IRIX64 (reported by Elias Pipping).
+	- deal with missing d_type and d_fileno on Solaris (reported by Mike
+	Belopuhov).
+	- update from the latest OpenCVS cvs repo (source only).
+
 2008-06-25  chl  <chl@tuxfamily.org>
 
 	- add strsep to openbsd-compat, to build on IRIX64. Taken from

@@ -482,7 +482,11 @@ cvs_file_walkdir(struct cvs_file *cf, struct cvs_recursion *cr)
 			if (!strcmp(dp->d_name, ".") ||
 			    !strcmp(dp->d_name, "..") ||
 			    !strcmp(dp->d_name, CVS_PATH_CVSDIR) ||
+#ifdef HAVE_DIRENT_FILENO
 			    dp->d_fileno == 0) {
+#elif HAVE_DIRENT_INO
+			    dp->d_ino == 0) {
+#endif
 				cp += dp->d_reclen;
 				continue;
 			}
@@ -502,7 +506,9 @@ cvs_file_walkdir(struct cvs_file *cf, struct cvs_recursion *cr)
 			 * for files and/or directories so when we encounter
 			 * this we call lstat() on the path to be sure.
 			 */
+#ifdef HAVE_DIRENT_TYPE
 			if (dp->d_type == DT_UNKNOWN) {
+#endif
 				if (lstat(fpath, &st) == -1)
 					fatal("'%s': %s", fpath,
 					    strerror(errno));
@@ -518,6 +524,7 @@ cvs_file_walkdir(struct cvs_file *cf, struct cvs_recursion *cr)
 					type = FILE_SKIP;
 					break;
 				}
+#ifdef HAVE_DIRENT_TYPE
 			} else {
 				switch (dp->d_type) {
 				case DT_DIR:
@@ -531,6 +538,7 @@ cvs_file_walkdir(struct cvs_file *cf, struct cvs_recursion *cr)
 					break;
 				}
 			}
+#endif
 
 			if (type == FILE_SKIP) {
 				if (verbosity > 1) {

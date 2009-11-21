@@ -7,6 +7,14 @@
 #include "defines.h"
 #include "sys-queue.h"
 
+#ifndef HAVE_ERR_H
+#include "error.h"
+#endif
+
+#ifndef HAVE_FNMATCH
+#include "fnmatch.h"
+#endif
+
 #ifdef HAVE_DIRENT_H
 	#include <dirent.h>
 #else

@@ -32,7 +32,13 @@ AC_ARG_WITH(Werror,
 )
 
 
-AC_CHECK_HEADERS([sys/dirent.h dirent.h sys/time.h utimes.h])
+AC_CHECK_HEADERS([ \
+		  sys/dirent.h \
+		  sys/time.h \
+		  err.h \
+		  dirent.h \
+		  utimes.h \
+		  ])
 AC_CHECK_FUNCS([ \
 		fgetln \
 		getdents \
@@ -44,8 +50,28 @@ AC_CHECK_FUNCS([ \
 		tzset \
 		])
 
-# comes from sudo's configure.in
+# utimes comes from sudo's configure.in
 AC_CHECK_FUNCS(utimes, [AC_CHECK_FUNCS(futimes futimesat, [break])], [AC_CHECK_FUNCS(futime) AC_LIBOBJ(utimes)])
+
+# fnmatch check is inspirred from a check from aclocal.m4
+
+dnl
+dnl check for working fnmatch(3)
+dnl
+
+AC_CACHE_CHECK([for working fnmatch with FNM_CASEFOLD], ac_cv_func_fnmatch, [
+	AC_TRY_RUN([#include <fnmatch.h>
+main() { exit(fnmatch("/*/bin/echo *", "/usr/bin/echo just a test", FNM_CASEFOLD)); }],
+       [ac_cv_func_fnmatch="yes"],
+       [ac_cv_func_fnmatch="no"],
+       [ac_cv_func_fnmatch="no"])
+])
+if test "x$ac_cv_func_fnmatch" = "xyes" ; then
+	AC_DEFINE(HAVE_FNMATCH, 1, [define if you have working fnmatch with FNM_CASEFOLD])
+	have_fnmatch=1
+fi
+
+
 
 
 # taken from portable openssh configure.ac
@@ -529,6 +555,69 @@ if test "x$ac_cv_have_getopt_optreset" = "xyes" ; then
 fi
 
 # end of portable openssh configure.ac inclusions
+
+# d_fileno and d_ test taken from apr
+
+dnl
+dnl APR_CHECK_DIRENT_FILENO
+dnl
+dnl  Decide if d_fileno or d_ino are available in the dirent
+dnl  structure on this platform.  Single UNIX Spec says d_ino,
+dnl  BSD uses d_fileno.  Undef to find the real beast.
+dnl
+AC_CACHE_CHECK([for dirent.d_fileno or .d_ino],
+	ac_cv_dirent_inode,
+	AC_TRY_COMPILE([
+		#include <dirent.h>
+		#ifdef d_ino
+		#undef d_ino
+		#endif
+		],
+		[ struct dirent de; de.d_fileno = 1; ],
+		[ ac_cv_dirent_inode="d_fileno" ],
+		[ ac_cv_dirent_inode="none" ]
+	)
+)
+
+if test "x$ac_cv_dirent_inode" = "xd_fileno"; then
+	AC_DEFINE(HAVE_DIRENT_FILENO, "d_fileno", [Define if dirent has d_fileno member])
+else
+	AC_TRY_COMPILE([
+		#include <dirent.h>
+		#ifdef d_fileno
+		#undef d_fileno
+		#endif
+		],
+	       	[ struct dirent de; de.d_ino = 1; ],
+	       	[ ac_cv_dirent_inode="d_ino"],
+		[ ac_cv_dirent_inode="none" ]
+	)
+
+	if test "$ac_cv_dirent_inode" = "d_ino"; then
+		AC_DEFINE(HAVE_DIRENT_INO, "d_ino", [Define if dirent has d_ino member])
+	fi
+fi
+
+dnl
+dnl APR_CHECK_DIRENT_TYPE
+dnl
+dnl  Decide if d_type is available in the dirent structure 
+dnl  on this platform.  Not part of the Single UNIX Spec
+dnl
+AC_CACHE_CHECK([for dirent.d_type],
+		ac_cv_dirent_d_type,
+			AC_TRY_LINK([
+				#include <dirent.h>
+				],
+			       	[ struct dirent de; de.d_type = DT_REG; ],
+				[ ac_cv_dirent_d_type="yes" ],
+				[ ac_cv_dirent_d_type="no" ]
+			)
+)
+
+if test "x$ac_cv_dirent_d_type" = "xyes"; then
+	AC_DEFINE(HAVE_DIRENT_TYPE, "d_type", [Define if dirent has d_type member])
+fi
 
 
 # taken from gnash configure.ac

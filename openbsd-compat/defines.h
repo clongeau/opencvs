@@ -68,6 +68,17 @@ enum
 # endif
 #endif
 
+/* chl: taken from uclibc */
+#ifndef MAXNAMLEN
+/* `MAXNAMLEN' is the BSD name for what POSIX calls `NAME_MAX'.  */
+# ifdef NAME_MAX
+#  define MAXNAMLEN	NAME_MAX
+# else
+#  define MAXNAMLEN	255
+# endif
+#endif
+
+
 #if defined(HAVE_DECL_MAXSYMLINKS) && HAVE_DECL_MAXSYMLINKS == 0
 # define MAXSYMLINKS 5
 #endif
@@ -128,6 +139,10 @@ enum
 
 #ifndef MAP_FAILED
 # define MAP_FAILED ((void *)-1)
+#endif
+
+#ifndef MAP_FILE
+# define MAP_FILE 0
 #endif
 
 /* *-*-nto-qnx doesn't define this constant in the system headers */

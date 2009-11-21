@@ -46,6 +46,10 @@ struct cvs_file {
 	int	 file_flags;
 	int	 in_attic;
 
+#if !defined(HAVE_GETDIRENTRIES) && !defined(HAVE_GETDENTS)
+	DIR     *dir;
+#endif
+
 	RCSNUM		*file_rcsrev;
 	RCSFILE		*file_rcs;
 	struct cvs_ent	*file_ent;

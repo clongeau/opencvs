@@ -17,7 +17,6 @@
 /init.c/1.32/Tue Aug 21 12:44:30 2007//THEAD
 /init.h/1.1/Tue Aug 21 12:44:31 2007//THEAD
 /repository.h/1.3/Tue Aug 21 12:44:31 2007//THEAD
-/root.c/1.43/Wed Sep 19 20:49:47 2007//THEAD
 /tag.c/1.57/Tue Aug 21 12:44:31 2007//THEAD
 /version.c/1.25/Tue Aug 21 12:44:31 2007//THEAD
 /watch.c/1.17/Tue Aug 21 12:44:31 2007//THEAD
@@ -37,9 +36,6 @@
 /cvs.h/1.147/Result of merge//THEAD
 /diff.c/1.121/Wed Sep 26 08:12:23 2007//THEAD
 /diff_internals.c/1.15/Result of merge//THEAD
-/edit.c/1.38/Wed Sep 26 08:12:23 2007//THEAD
-/entries.c/1.83/Result of merge+Wed Sep 26 08:12:23 2007//THEAD
-/file.c/1.202/Result of merge//THEAD
 /file.h/1.46/Wed Sep 26 08:12:23 2007//THEAD
 /getlog.c/1.78/Wed Sep 26 08:12:23 2007//THEAD
 /import.c/1.77/Wed Sep 26 08:12:23 2007//THEAD
@@ -53,11 +49,15 @@
 /repository.c/1.15/Wed Sep 26 08:12:23 2007//THEAD
 /server.c/1.72/Wed Sep 26 08:12:23 2007//THEAD
 /status.c/1.77/Wed Sep 26 08:12:23 2007//THEAD
-/util.c/1.119/Result of merge//THEAD
 /buf.c/1.66/Wed Sep 26 08:12:22 2007//THEAD
 /logmsg.c/1.45/Wed Sep 26 08:12:23 2007//THEAD
-/Makefile/1.41/Tue Oct  2 20:20:11 2007//
 /log.h/1.22/Tue Oct  2 20:29:52 2007//THEAD
 /update.c/1.112/Tue Oct  2 20:32:02 2007//THEAD
 /commit.c/1.114/Thu Oct  4 12:48:38 2007//THEAD
+/Makefile/1.41/Sat Oct  6 00:33:54 2007//
+/edit.c/1.39/Sat Oct  6 00:33:55 2007//THEAD
+/entries.c/1.84/Result of merge//THEAD
+/file.c/1.203/Result of merge//THEAD
+/root.c/1.44/Sat Oct  6 00:33:55 2007//THEAD
+/util.c/1.120/Result of merge//THEAD
 D

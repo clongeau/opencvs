@@ -228,7 +228,14 @@ cvs_update_leavedir(struct cvs_file *cf)
 	if (lseek(cf->fd, 0, SEEK_SET) == -1)
 		fatal("cvs_update_leavedir: %s", strerror(errno));
 
+#if   defined(HAVE_GETDIRENTRIES)
 	while ((nbytes = getdirentries(cf->fd, buf, bufsize, &base)) > 0) {
+#elif defined(HAVE_GETDENTS)
+	while ((nbytes = getdents(cf->fd, buf, bufsize)) > 0) {
+#else
+	nbytes = sizeof(buf[0]);
+	while ((buf[0] = readdir(cf->dir)) != NULL) {
+#endif
 		ebuf = buf + nbytes;
 		cp = buf;
 

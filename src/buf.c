@@ -324,7 +324,11 @@ cvs_buf_write_stmp(BUF *b, char *template, struct timeval *tv)
 	}
 
 	if (tv != NULL) {
+#if defined(HAVE_FUTIME) || defined(HAVE_FUTIMES)
 		if (futimes(fd, tv) == -1)
+#else
+		if (utimes(template, tv) == -1)
+#endif
 			fatal("cvs_buf_write_stmp: futimes failed");
 	}
 

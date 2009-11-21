@@ -1,4 +1,4 @@
-/*	$OpenBSD: file.c,v 1.202 2007/09/24 13:44:20 joris Exp $	*/
+/*	$OpenBSD: file.c,v 1.203 2007/10/05 19:28:23 gilles Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
@@ -84,7 +84,6 @@ cvs_file_init(void)
 {
 	int i;
 	FILE *ifp;
-	size_t len;
 	char path[MAXPATHLEN], buf[MAXNAMLEN];
 
 	TAILQ_INIT(&cvs_ign_pats);
@@ -107,11 +106,9 @@ cvs_file_init(void)
 			    "failed to open user's cvsignore file `%s'", path);
 	} else {
 		while (fgets(buf, MAXNAMLEN, ifp) != NULL) {
-			len = strlen(buf);
-			if (len == 0)
+			buf[strcspn(buf, "\n")] = '\0';
+			if (buf[0] == '\0')
 				continue;
-			if (buf[len - 1] == '\n')
-				buf[len - 1] = '\0';
 
 			cvs_file_ignore(buf, &cvs_ign_pats);
 		}
@@ -231,6 +228,12 @@ cvs_file_get_cf(const char *d, const char *f, int fd, int type)
 	cf->file_type = type;
 	cf->file_status = cf->file_flags = 0;
 	cf->file_ent = NULL;
+
+#if !defined(HAVE_GETDIRENTRIES) && !defined(HAVE_GETDENTS)
+	if (cf->file_type == CVS_DIR)
+		if ((cf->dir = opendir(cf->file_path)) == NULL)
+			fatal("cvs_file_get_cf: opendir failed on '%s'", cf->file_path);
+#endif
 
 	return (cf);
 }
@@ -352,7 +355,6 @@ cvs_file_walkdir(struct cvs_file *cf, struct cvs_recursion *cr)
 	int l, type;
 	FILE *fp;
 	int nbytes;
-	size_t len;
 	long base;
 	size_t bufsize;
 	struct stat st;
@@ -397,11 +399,9 @@ cvs_file_walkdir(struct cvs_file *cf, struct cvs_recursion *cr)
 
 	if ((fp = fopen(fpath, "r")) != NULL) {
 		while (fgets(fpath, MAXPATHLEN, fp) != NULL) {
-			len = strlen(fpath);
-			if (len == 0)
+			fpath[strcspn(fpath, "\n")] = '\0';
+			if (fpath[0] == '\0')
 				continue;
-			if (fpath[len - 1] == '\n')
-				fpath[len - 1] = '\0';
 
 			cvs_file_ignore(fpath, &dir_ign_pats);
 		}
@@ -421,7 +421,14 @@ cvs_file_walkdir(struct cvs_file *cf, struct cvs_recursion *cr)
 	TAILQ_INIT(&fl);
 	TAILQ_INIT(&dl);
 
+#if   defined(HAVE_GETDIRENTRIES)
 	while ((nbytes = getdirentries(cf->fd, buf, bufsize, &base)) > 0) {
+#elif defined(HAVE_GETDENTS)
+	while ((nbytes = getdents(cf->fd, buf, bufsize)) > 0) {
+#else
+	nbytes = sizeof(buf[0]);
+	while ((buf[0] = readdir(cf->dir)) != NULL) {
+#endif
 		ebuf = buf + nbytes;
 		cp = buf;
 
@@ -440,7 +447,7 @@ cvs_file_walkdir(struct cvs_file *cf, struct cvs_recursion *cr)
 				continue;
 			}
 
-			len = xsnprintf(fpath, MAXPATHLEN, "%s/%s",
+			(void)xsnprintf(fpath, MAXPATHLEN, "%s/%s",
 			    cf->file_path, dp->d_name);
 
 			/*
@@ -877,6 +884,11 @@ cvs_file_free(struct cvs_file *cf)
 		(void)close(cf->fd);
 	if (cf->repo_fd != -1)
 		(void)close(cf->repo_fd);
+#if !defined(HAVE_GETDIRENTRIES) && !defined(HAVE_GETDENTS)
+	if (cf->file_type == CVS_DIR)
+		if (cf->dir != NULL)
+			(void)closedir(cf->dir);
+#endif
 	xfree(cf);
 }
 
@@ -1010,7 +1022,11 @@ cvs_file_copy(const char *from, const char *to)
 		tv[0].tv_sec = atime;
 		tv[1].tv_sec = mtime;
 
+#if defined(HAVE_FUTIME) || defined(HAVE_FUTIMES)
 		if (futimes(dst, tv) == -1) {
+#else
+		if (utimes(to, tv) == -1) {
+#endif
 			saved_errno = errno;
 			(void)unlink(to);
 			fatal("cvs_file_copy: futimes: %s",

@@ -708,7 +708,11 @@ cvs_client_updated(char *data)
 	tv[0].tv_usec = 0;
 	tv[1] = tv[0];
 
+#if defined(HAVE_FUTIME) || defined(HAVE_FUTIMES)
 	if (futimes(fd, tv) == -1)
+#else
+	if (utimes(fpath, tv) == -1)
+#endif
 		fatal("cvs_client_updated: futimes: %s", strerror(errno));
 
 	if (fchmod(fd, fmode) == -1)
@@ -782,7 +786,11 @@ cvs_client_merged(char *data)
 	tv[0].tv_usec = 0;
 	tv[1] = tv[0];
 
+#if defined(HAVE_FUTIME) || defined(HAVE_FUTIMES)
 	if (futimes(fd, tv) == -1)
+#else
+	if (utimes(fpath, tv) == -1)
+#endif
 		fatal("cvs_client_merged: futimes: %s", strerror(errno));
 
 	if (fchmod(fd, fmode) == -1)

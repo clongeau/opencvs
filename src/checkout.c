@@ -306,7 +306,11 @@ cvs_checkout_file(struct cvs_file *cf, RCSNUM *rnum, char *tag, int co_flags)
 		tv[0].tv_sec = rcstime;
 		tv[0].tv_usec = 0;
 		tv[1] = tv[0];
+#if defined(HAVE_FUTIME) || defined(HAVE_FUTIMES)
 		if (futimes(cf->fd, tv) == -1)
+#else
+		if (utimes(cf->file_path, tv) == -1)
+#endif
 			fatal("cvs_checkout_file: futimes: %s",
 			    strerror(errno));
 	} else {

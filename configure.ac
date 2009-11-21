@@ -8,9 +8,13 @@ AC_PROG_INSTALL
 AC_PROG_LIBTOOL
 AC_PROG_LN_S
 
-AC_CHECK_HEADERS([sys/dirent.h dirent.h sys/time.h])
-AC_CHECK_FUNCS([fgetln strlcat strlcpy strtonum])
+AC_CHECK_HEADERS([sys/dirent.h dirent.h sys/time.h utimes.h])
+AC_CHECK_FUNCS([fgetln strlcat strlcpy strtonum getdirentries getdents])
 
+#comes from sudo's configure.in
+AC_CHECK_FUNCS(utimes, [AC_CHECK_FUNCS(futimes futimesat, [break])], [AC_CHECK_FUNCS(futime) AC_LIBOBJ(utimes)])
+
+#comes from portable openssh
 AC_CHECK_DECL(LLONG_MAX, have_llong_max=1, , [#include <limits.h>])
 
 if test "$GCC" = "yes" || test "$GCC" = "egcs"; then

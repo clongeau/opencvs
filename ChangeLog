@@ -1,0 +1,14 @@
+2007-10-04  chl  <chl@tuxfamily.org>
+
+	* openbsd-compat/: 
+	* regress/: 
+	- add openbsd-compat and regress directories to follow Damien
+	Miller advise
+
+	* src/worklist.h: 
+	* src/file.h: 
+	- make it build on amd64
+
+2007-10-02  chl  <chl@tuxfamily.org>
+
+	- first announcement to OpenCVS developers

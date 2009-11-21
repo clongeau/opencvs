@@ -4,6 +4,7 @@
 	- add LICENCE file.
 	- fix build for FreeBSD 6.2-RELEASE (thanks to Igor Zinovik for the
 	report and patch).
+	- use static library for openbsd-compat, instead of dynamic one.
 
 2008-02-05  chl  <chl@tuxfamily.org>
 
@@ -37,7 +38,7 @@
 2007-10-06  chl  <chl@tuxfamily.org>
 
 	- make it build when futimes and getdirentries are not available.
-	(Thanks to Natanael Copa for the initial report and help)
+	(thanks to Natanael Copa for the initial report and help)
 	Now it build on Alpine Linux, which is a Gentoo uclibc distro.
 
 2007-10-04  chl  <chl@tuxfamily.org>

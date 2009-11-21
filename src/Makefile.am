@@ -10,6 +10,6 @@ opencvs_SOURCES = cvs.c add.c admin.c annotate.c atomicio.c commit.c config.c \
 
 INCLUDES = -I$(top_srcdir)/openbsd-compat/
 
-LIBCOMPAT=$(top_srcdir)/openbsd-compat/.libs/libopenbsd-compat.a
+LIBCOMPAT=$(top_srcdir)/openbsd-compat/libopenbsd-compat.a
 
 LDADD = $(LIBCOMPAT)

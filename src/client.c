@@ -1,4 +1,4 @@
-/*	$OpenBSD: client.c,v 1.89 2008/01/10 11:20:29 tobias Exp $	*/
+/*	$OpenBSD: client.c,v 1.94 2008/02/01 17:18:59 tobias Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -95,7 +95,8 @@ struct cvs_req cvs_requests[] = {
 	{ "import",			0,	cvs_server_import,
 	    REQ_NEEDDIR },
 	{ "admin",			0,	cvs_server_admin, REQ_NEEDDIR },
-	{ "export",			0,	NULL, 0 },
+	{ "export",			0,	cvs_server_export,
+	    REQ_NEEDDIR },
 	{ "history",			0,	NULL, 0 },
 	{ "release",			0,	cvs_server_release,
 	    REQ_NEEDDIR },
@@ -108,7 +109,7 @@ struct cvs_req cvs_requests[] = {
 	{ "init",			0,	cvs_server_init, 0 },
 	{ "annotate",			0,	cvs_server_annotate,
 	    REQ_NEEDDIR },
-	{ "rannotate",			0,	NULL, 0 },
+	{ "rannotate",			0,	cvs_server_rannotate, 0 },
 	{ "noop",			0,	NULL, 0 },
 	{ "version",			0,	cvs_server_version, 0 },
 	{ "",				-1,	NULL, 0 }
@@ -167,6 +168,9 @@ client_check_directory(char *data)
 	STRIP_SLASH(data);
 
 	cvs_mkpath(data, NULL);
+
+	if (cvs_cmdop == CVS_OP_EXPORT)
+		return;
 
 	if ((base = basename(data)) == NULL)
 		fatal("client_check_directory: overflow");
@@ -445,7 +449,7 @@ void
 cvs_client_sendfile(struct cvs_file *cf)
 {
 	size_t len;
-	char rev[CVS_REV_BUFSZ], timebuf[CVS_TIME_BUFSZ], sticky[32];
+	char rev[CVS_REV_BUFSZ], timebuf[CVS_TIME_BUFSZ], sticky[CVS_REV_BUFSZ];
 
 	if (cf->file_type != CVS_FILE)
 		return;
@@ -713,9 +717,12 @@ cvs_client_updated(char *data)
 	    e->ce_opts ? e->ce_opts : "", sticky);
 
 	cvs_ent_free(e);
-	ent = cvs_ent_open(wdir);
-	cvs_ent_add(ent, entry);
-	cvs_ent_close(ent, ENT_SYNC);
+
+	if (cvs_cmdop != CVS_OP_EXPORT) {
+		ent = cvs_ent_open(wdir);
+		cvs_ent_add(ent, entry);
+		cvs_ent_close(ent, ENT_SYNC);
+	}
 
 	if ((fd = open(fpath, O_CREAT | O_WRONLY | O_TRUNC)) == -1)
 		fatal("cvs_client_updated: open: %s: %s",
@@ -829,6 +836,9 @@ cvs_client_removed(char *data)
 	CVSENTRIES *entlist;
 	char *rpath, *filename, fpath[MAXPATHLEN];
 
+	if (data == NULL)
+		fatal("Missing argument for Removed");
+
 	rpath = cvs_remote_input();
 	if ((filename = strrchr(rpath, '/')) == NULL)
 		fatal("bad rpath in cvs_client_removed: %s", rpath);
@@ -871,9 +881,6 @@ cvs_client_set_static_directory(char *data)
 	FILE *fp;
 	char *dir, fpath[MAXPATHLEN];
 
-	if (cvs_cmdop == CVS_OP_EXPORT)
-		return;
-
 	if (data == NULL)
 		fatal("Missing argument for Set-static-directory");
 
@@ -881,6 +888,9 @@ cvs_client_set_static_directory(char *data)
 
 	dir = cvs_remote_input();
 	xfree(dir);
+
+	if (cvs_cmdop == CVS_OP_EXPORT)
+		return;
 
 	(void)xsnprintf(fpath, MAXPATHLEN, "%s/%s",
 	    data, CVS_PATH_STATICENTRIES);
@@ -897,9 +907,6 @@ cvs_client_clear_static_directory(char *data)
 {
 	char *dir, fpath[MAXPATHLEN];
 
-	if (cvs_cmdop == CVS_OP_EXPORT)
-		return;
-
 	if (data == NULL)
 		fatal("Missing argument for Clear-static-directory");
 
@@ -907,6 +914,9 @@ cvs_client_clear_static_directory(char *data)
 
 	dir = cvs_remote_input();
 	xfree(dir);
+
+	if (cvs_cmdop == CVS_OP_EXPORT)
+		return;
 
 	(void)xsnprintf(fpath, MAXPATHLEN, "%s/%s",
 	    data, CVS_PATH_STATICENTRIES);
@@ -920,9 +930,6 @@ cvs_client_set_sticky(char *data)
 	FILE *fp;
 	char *dir, *tag, tagpath[MAXPATHLEN];
 
-	if (cvs_cmdop == CVS_OP_EXPORT)
-		return;
-
 	if (data == NULL)
 		fatal("Missing argument for Set-sticky");
 
@@ -931,6 +938,9 @@ cvs_client_set_sticky(char *data)
 	dir = cvs_remote_input();
 	xfree(dir);
 	tag = cvs_remote_input();
+
+	if (cvs_cmdop == CVS_OP_EXPORT)
+		goto out;
 
 	client_check_directory(data);
 
@@ -952,9 +962,6 @@ cvs_client_clear_sticky(char *data)
 {
 	char *dir, tagpath[MAXPATHLEN];
 
-	if (cvs_cmdop == CVS_OP_EXPORT)
-		return;
-
 	if (data == NULL)
 		fatal("Missing argument for Clear-sticky");
 
@@ -962,6 +969,9 @@ cvs_client_clear_sticky(char *data)
 
 	dir = cvs_remote_input();
 	xfree(dir);
+
+	if (cvs_cmdop == CVS_OP_EXPORT)
+		return;
 
 	client_check_directory(data);
 
@@ -1082,7 +1092,7 @@ cvs_client_initlog(void)
 		break;
 	}
 
-	if ((cvs_client_outlog_fd = open(fpath, 
+	if ((cvs_client_outlog_fd = open(fpath,
 	    O_RDWR | O_CREAT | O_TRUNC, 0644)) == -1) {
 		fatal("cvs_client_initlog: open `%s': %s",
 		    fpath, strerror(errno));

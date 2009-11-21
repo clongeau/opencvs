@@ -1,4 +1,4 @@
-/*	$OpenBSD: file.c,v 1.209 2008/01/10 11:21:34 tobias Exp $	*/
+/*	$OpenBSD: file.c,v 1.212 2008/01/31 21:56:34 tobias Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
@@ -377,15 +377,24 @@ cvs_file_walkdir(struct cvs_file *cf, struct cvs_recursion *cr)
 		return;
 
 	/*
+	 * If this is a repository-only command, do not touch any
+	 * locally available directories or try to create them.
+	 */
+	if (!(cmdp->cmd_flags & CVS_USE_WDIR)) {
+		TAILQ_INIT(&fl);
+		TAILQ_INIT(&dl);
+		goto walkrepo;
+	}
+
+	/*
 	 * If we do not have a admin directory inside here, dont bother,
-	 * unless we are running import.
+	 * unless we are running export or import.
 	 */
 	(void)xsnprintf(fpath, MAXPATHLEN, "%s/%s", cf->file_path,
 	    CVS_PATH_CVSDIR);
 
 	l = stat(fpath, &st);
-	if (cvs_cmdop != CVS_OP_IMPORT && cvs_cmdop != CVS_OP_RLOG &&
-	    cvs_cmdop != CVS_OP_RTAG &&
+	if (cvs_cmdop != CVS_OP_EXPORT && cvs_cmdop != CVS_OP_IMPORT &&
 	    (l == -1 || (l == 0 && !S_ISDIR(st.st_mode)))) {
 		return;
 	}
@@ -544,12 +553,17 @@ cvs_file_walkdir(struct cvs_file *cf, struct cvs_recursion *cr)
 
 	cvs_ent_close(entlist, ENT_NOSYNC);
 
+walkrepo:
 	if (cr->flags & CR_REPO) {
 		cvs_get_repository_path(cf->file_path, repo, MAXPATHLEN);
 		cvs_repository_lock(repo);
 
-		cvs_repository_getdir(repo, cf->file_path, &fl, &dl,
-		    (cr->flags & CR_RECURSE_DIRS));
+		xsnprintf(fpath, sizeof(fpath), "%s/%s", cf->file_path,
+		    CVS_PATH_STATICENTRIES);
+
+		if (stat(fpath, &st) == -1)
+			cvs_repository_getdir(repo, cf->file_path, &fl, &dl,
+			    (cr->flags & CR_RECURSE_DIRS));
 	}
 
 	cvs_file_walklist(&fl, cr);
@@ -564,7 +578,7 @@ cvs_file_walkdir(struct cvs_file *cf, struct cvs_recursion *cr)
 	if (cr->leavedir != NULL)
 		cr->leavedir(cf);
 
-	if (cvs_directory_tag != NULL) {
+	if (cvs_directory_tag != NULL && cmdp->cmd_flags & CVS_USE_WDIR) {
 		cvs_write_tagfile(cf->file_path, cvs_directory_tag, NULL, 0);
 		xfree(cvs_directory_tag);
 		cvs_directory_tag = NULL;
@@ -608,17 +622,20 @@ cvs_file_classify(struct cvs_file *cf, const char *tag)
 	(void)xsnprintf(rcsfile, MAXPATHLEN, "%s/%s",
 	    repo, cf->file_name);
 
-	if (cvs_cmdop != CVS_OP_RLOG && cvs_cmdop != CVS_OP_RTAG &&
-	    cf->file_type == CVS_FILE) {
+	if (cf->file_type == CVS_FILE) {
 		len = strlcat(rcsfile, RCS_FILE_EXT, MAXPATHLEN);
 		if (len >= MAXPATHLEN)
 			fatal("cvs_file_classify: truncation");
 	}
 
 	cf->file_rpath = xstrdup(rcsfile);
-	entlist = cvs_ent_open(cf->file_wd);
-	cf->file_ent = cvs_ent_get(entlist, cf->file_name);
-	cvs_ent_close(entlist, ENT_NOSYNC);
+
+	if (cmdp->cmd_flags & CVS_USE_WDIR) {
+		entlist = cvs_ent_open(cf->file_wd);
+		cf->file_ent = cvs_ent_get(entlist, cf->file_name);
+		cvs_ent_close(entlist, ENT_NOSYNC);
+	} else
+		cf->file_ent = NULL;
 
 	if (cf->file_ent != NULL) {
 		if (cf->file_ent->ce_type == CVS_ENT_DIR &&
@@ -635,7 +652,9 @@ cvs_file_classify(struct cvs_file *cf, const char *tag)
 	}
 
 	if (cf->file_type == CVS_DIR) {
-		if (cf->fd == -1 && stat(rcsfile, &st) != -1)
+		if (!(cmdp->cmd_flags & CVS_USE_WDIR))
+			cf->file_status = FILE_UPTODATE;
+		else if (cf->fd == -1 && stat(rcsfile, &st) != -1)
 			cf->file_status = DIR_CREATE;
 		else if (cf->file_ent != NULL || cvs_cmdop == CVS_OP_RLOG ||
 		    cvs_cmdop == CVS_OP_RTAG)

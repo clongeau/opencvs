@@ -1,4 +1,4 @@
-/*	$OpenBSD: edit.c,v 1.40 2008/01/10 10:08:22 tobias Exp $	*/
+/*	$OpenBSD: edit.c,v 1.42 2008/01/31 10:15:05 tobias Exp $	*/
 /*
  * Copyright (c) 2006, 2007 Xavier Santolaria <xsa@openbsd.org>
  *
@@ -42,7 +42,7 @@ static RCSNUM	*cvs_base_handle(struct cvs_file *, int);
 static int	edit_aflags = 0;
 
 struct cvs_cmd cvs_cmd_edit = {
-	CVS_OP_EDIT, 0, "edit",
+	CVS_OP_EDIT, CVS_USE_WDIR, "edit",
 	{ },
 	"Get ready to edit a watched file",
 	"[-lR] [-a action] [file ...]",
@@ -52,7 +52,7 @@ struct cvs_cmd cvs_cmd_edit = {
 };
 
 struct cvs_cmd cvs_cmd_editors = {
-	CVS_OP_EDITORS, 0, "editors",
+	CVS_OP_EDITORS, CVS_USE_WDIR, "editors",
 	{ },
 	"See who is editing a watched file",
 	"[-lR] [file ...]",
@@ -62,7 +62,7 @@ struct cvs_cmd cvs_cmd_editors = {
 };
 
 struct cvs_cmd cvs_cmd_unedit = {
-	CVS_OP_UNEDIT, 0, "unedit",
+	CVS_OP_UNEDIT, CVS_USE_WDIR, "unedit",
 	{ },
 	"Undo an edit command",
 	"[-lR] [file ...]",
@@ -100,6 +100,7 @@ cvs_edit(int argc, char **argv)
 			flags &= ~CR_RECURSE_DIRS;
 			break;
 		case 'R':
+			flags |= CR_RECURSE_DIRS;
 			break;
 		default:
 			fatal("%s", cvs_cmd_edit.cmd_synopsis);
@@ -157,6 +158,7 @@ cvs_editors(int argc, char **argv)
 			flags &= ~CR_RECURSE_DIRS;
 			break;
 		case 'R':
+			flags |= CR_RECURSE_DIRS;
 			break;
 		default:
 			fatal("%s", cvs_cmd_editors.cmd_synopsis);
@@ -211,6 +213,7 @@ cvs_unedit(int argc, char **argv)
 			flags &= ~CR_RECURSE_DIRS;
 			break;
 		case 'R':
+			flags |= CR_RECURSE_DIRS;
 			break;
 		default:
 			fatal("%s", cvs_cmd_unedit.cmd_synopsis);

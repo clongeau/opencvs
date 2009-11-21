@@ -1,4 +1,4 @@
-/*	$OpenBSD: admin.c,v 1.52 2007/09/22 16:01:22 joris Exp $	*/
+/*	$OpenBSD: admin.c,v 1.54 2008/01/31 21:52:48 tobias Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * Copyright (c) 2005 Joris Vink <joris@openbsd.org>
@@ -33,7 +33,7 @@
 void	cvs_admin_local(struct cvs_file *);
 
 struct cvs_cmd cvs_cmd_admin = {
-	CVS_OP_ADMIN, 0, "admin",
+	CVS_OP_ADMIN, CVS_USE_WDIR, "admin",
 	{ "adm", "rcs" },
 	"Administrative front-end for RCS",
 	"[-ILqU] [-A oldfile] [-a users] [-b branch]\n"
@@ -169,7 +169,7 @@ cvs_admin(int argc, char **argv)
 			cvs_client_send_request("Argument -U");
 
 		if (logstr != NULL)
-			cvs_client_send_request("Argument -m%s", logstr);
+			cvs_client_send_logmsg(logstr);
 
 		if (orange != NULL)
 			cvs_client_send_request("Argument -o%s", orange);

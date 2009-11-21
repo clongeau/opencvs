@@ -1,4 +1,4 @@
-/*	$OpenBSD: status.c,v 1.78 2008/01/10 09:37:26 tobias Exp $	*/
+/*	$OpenBSD: status.c,v 1.80 2008/01/31 10:15:05 tobias Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  * Copyright (c) 2005, 2006 Xavier Santolaria <xsa@openbsd.org>
@@ -27,7 +27,7 @@ void	cvs_status_local(struct cvs_file *);
 static int show_sym = 0;
 
 struct cvs_cmd cvs_cmd_status = {
-	CVS_OP_STATUS, 0, "status",
+	CVS_OP_STATUS, CVS_USE_WDIR, "status",
 	{ "st", "stat" },
 	"Display status information on checked out files",
 	"[-lRv]",
@@ -69,6 +69,7 @@ cvs_status(int argc, char **argv)
 			flags &= ~CR_RECURSE_DIRS;
 			break;
 		case 'R':
+			flags |= CR_RECURSE_DIRS;
 			break;
 		case 'v':
 			show_sym = 1;

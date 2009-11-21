@@ -1,4 +1,4 @@
-/*	$OpenBSD: checkout.c,v 1.107 2008/01/10 10:08:22 tobias Exp $	*/
+/*	$OpenBSD: checkout.c,v 1.115 2008/01/31 19:51:40 xsa Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -29,6 +29,7 @@
 #include "remote.h"
 
 static void checkout_check_repository(int, char **);
+static int checkout_classify(const char *, const char *);
 static void checkout_repository(const char *, const char *);
 
 extern int print_stdout;
@@ -38,7 +39,7 @@ extern int build_dirs;
 static int flags = CR_REPO | CR_RECURSE_DIRS;
 
 struct cvs_cmd cvs_cmd_checkout = {
-	CVS_OP_CHECKOUT, 0, "checkout",
+	CVS_OP_CHECKOUT, CVS_USE_WDIR, "checkout",
 	{ "co", "get" },
 	"Checkout a working copy of a repository",
 	"[-AcflNnPpRs] [-D date | -r tag] [-d dir] [-j rev] [-k mode] "
@@ -49,7 +50,7 @@ struct cvs_cmd cvs_cmd_checkout = {
 };
 
 struct cvs_cmd cvs_cmd_export = {
-	CVS_OP_EXPORT, 0, "export",
+	CVS_OP_EXPORT, CVS_USE_WDIR, "export",
 	{ "exp", "ex" },
 	"Export sources from CVS, similar to checkout",
 	"[-flNnR] [-d dir] [-k mode] -D date | -r rev module ...",
@@ -77,10 +78,12 @@ cvs_checkout(int argc, char **argv)
 			prune_dirs = 1;
 			break;
 		case 'p':
+			cmdp->cmd_flags &= ~CVS_USE_WDIR;
 			print_stdout = 1;
 			cvs_noexec = 1;
 			break;
 		case 'R':
+			flags |= CR_RECURSE_DIRS;
 			break;
 		case 'r':
 			cvs_specified_tag = optarg;
@@ -114,6 +117,7 @@ cvs_export(int argc, char **argv)
 			flags &= ~CR_RECURSE_DIRS;
 			break;
 		case 'R':
+			flags |= CR_RECURSE_DIRS;
 			break;
 		case 'r':
 			cvs_specified_tag = optarg;
@@ -125,6 +129,9 @@ cvs_export(int argc, char **argv)
 
 	argc -= optind;
 	argv += optind;
+
+	if (cvs_specified_tag == NULL)
+		fatal("must specify a tag or date");
 
 	if (argc == 0)
 		fatal("%s", cvs_cmd_export.cmd_synopsis);
@@ -139,7 +146,6 @@ checkout_check_repository(int argc, char **argv)
 {
 	int i;
 	char repo[MAXPATHLEN];
-	struct stat st;
 	struct cvs_recursion cr;
 
 	build_dirs = print_stdout ? 0 : 1;
@@ -172,7 +178,8 @@ checkout_check_repository(int argc, char **argv)
 		flags &= ~CR_REPO;
 		cr.flags = flags;
 
-		cvs_file_run(argc, argv, &cr);
+		if (cvs_cmdop != CVS_OP_EXPORT)
+			cvs_file_run(argc, argv, &cr);
 
 		cvs_client_send_files(argv, argc);
 		cvs_client_senddir(".");
@@ -191,31 +198,64 @@ checkout_check_repository(int argc, char **argv)
 		(void)xsnprintf(repo, sizeof(repo), "%s/%s",
 		    current_cvsroot->cr_dir, argv[i]);
 
-		if (stat(repo, &st) == -1) {
-			/* check if a single file was requested */
-			strlcat(repo, RCS_FILE_EXT, MAXPATHLEN);
-
-			if (stat(repo, &st) == -1) {
-				cvs_log(LP_ERR,
-				    "cannot find module `%s' - ignored",
-				    argv[i]);
-				continue;
-			}
-
+		switch (checkout_classify(repo, argv[i])) {
+		case CVS_FILE:
 			cr.fileproc = cvs_update_local;
 			cr.flags = flags;
 
 			if (build_dirs == 1)
 				cvs_mkpath(dirname(argv[i]), cvs_specified_tag);
 			cvs_file_run(1, &(argv[i]), &cr);
-
-			continue;
+			break;
+		case CVS_DIR:
+			if (build_dirs == 1)
+				cvs_mkpath(argv[i], cvs_specified_tag);
+			checkout_repository(repo, argv[i]);
+			break;
+		default:
+			break;
 		}
-
-		if (build_dirs == 1)
-			cvs_mkpath(argv[i], cvs_specified_tag);
-		checkout_repository(repo, argv[i]);
 	}
+}
+
+static int
+checkout_classify(const char *repo, const char *arg)
+{
+	char *d, *f, fpath[MAXPATHLEN];
+	struct stat sb;
+
+	if (stat(repo, &sb) == 0) {
+		if (!S_ISDIR(sb.st_mode)) {
+			cvs_log(LP_ERR, "ignoring %s: not a directory", arg);
+			return 0;
+		}
+		return CVS_DIR;
+	}
+
+	d = dirname(repo);
+	f = basename(repo);
+
+	(void)xsnprintf(fpath, sizeof(fpath), "%s/%s%s", d, f, RCS_FILE_EXT);
+	if (stat(fpath, &sb) == 0) {
+		if (!S_ISREG(sb.st_mode)) {
+			cvs_log(LP_ERR, "ignoring %s: not a regular file", arg);
+			return 0;
+		}
+		return CVS_FILE;
+	}
+
+	(void)xsnprintf(fpath, sizeof(fpath), "%s/%s/%s%s",
+	    d, CVS_PATH_ATTIC, f, RCS_FILE_EXT);
+	if (stat(fpath, &sb) == 0) {
+		if (!S_ISREG(sb.st_mode)) {
+			cvs_log(LP_ERR, "ignoring %s: not a regular file", arg);
+			return 0;
+		}
+		return CVS_FILE;
+	}
+
+	cvs_log(LP_ERR, "cannot find module `%s' - ignored", arg);
+	return 0;
 }
 
 static void
@@ -230,13 +270,19 @@ checkout_repository(const char *repobase, const char *wdbase)
 	cvs_history_add((cvs_cmdop == CVS_OP_CHECKOUT) ?
 	    CVS_HISTORY_CHECKOUT : CVS_HISTORY_EXPORT, NULL, wdbase);
 
-	cr.enterdir = cvs_update_enterdir;
-	cr.leavedir = cvs_update_leavedir;
+	if (print_stdout) {
+		cr.enterdir = NULL;
+		cr.leavedir = NULL;
+	} else {
+		cr.enterdir = cvs_update_enterdir;
+		cr.leavedir = cvs_update_leavedir;
+	}
 	cr.fileproc = cvs_update_local;
 	cr.flags = flags;
 
 	cvs_repository_lock(repobase);
-	cvs_repository_getdir(repobase, wdbase, &fl, &dl, 1);
+	cvs_repository_getdir(repobase, wdbase, &fl, &dl,
+	    flags & CR_RECURSE_DIRS ? 1 : 0);
 
 	cvs_file_walklist(&fl, &cr);
 	cvs_file_freelist(&fl);
@@ -256,7 +302,7 @@ cvs_checkout_file(struct cvs_file *cf, RCSNUM *rnum, char *tag, int co_flags)
 	struct timeval tv[2];
 	char *tosend;
 	char template[MAXPATHLEN], entry[CVS_ENT_MAXLINELEN];
-	char kbuf[8], stickytag[32], rev[CVS_REV_BUFSZ];
+	char kbuf[8], sticky[CVS_REV_BUFSZ], rev[CVS_REV_BUFSZ];
 	char timebuf[CVS_TIME_BUFSZ], tbuf[CVS_TIME_BUFSZ];
 
 	exists = 0;
@@ -329,13 +375,15 @@ cvs_checkout_file(struct cvs_file *cf, RCSNUM *rnum, char *tag, int co_flags)
 
 	if (co_flags & CO_SETSTICKY)
 		if (tag != NULL)
-			(void)xsnprintf(stickytag, sizeof(stickytag), "T%s",
-			    tag);
+			(void)xsnprintf(sticky, sizeof(sticky), "T%s", tag);
 		else
-			(void)xsnprintf(stickytag, sizeof(stickytag), "T%s",
-			    rev);
+			(void)xsnprintf(sticky, sizeof(sticky), "T%s", rev);
+	else if (!reset_stickies && cf->file_ent != NULL &&
+	    cf->file_ent->ce_tag != NULL)
+		(void)xsnprintf(sticky, sizeof(sticky), "T%s",
+		    cf->file_ent->ce_tag);
 	else
-		stickytag[0] = '\0';
+		sticky[0] = '\0';
 
 	kbuf[0] = '\0';
 	if (cf->file_ent != NULL) {
@@ -349,10 +397,10 @@ cvs_checkout_file(struct cvs_file *cf, RCSNUM *rnum, char *tag, int co_flags)
 	}
 
 	(void)xsnprintf(entry, CVS_ENT_MAXLINELEN, "/%s/%s/%s/%s/%s",
-	    cf->file_name, rev, timebuf, kbuf, stickytag);
+	    cf->file_name, rev, timebuf, kbuf, sticky);
 
 	if (cvs_server_active == 0) {
-		if (!(co_flags & CO_REMOVE)) {
+		if (!(co_flags & CO_REMOVE) && cvs_cmdop != CVS_OP_EXPORT) {
 			ent = cvs_ent_open(cf->file_wd);
 			cvs_ent_add(ent, entry);
 			cvs_ent_close(ent, ENT_SYNC);

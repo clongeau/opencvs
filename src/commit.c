@@ -1,4 +1,4 @@
-/*	$OpenBSD: commit.c,v 1.117 2008/01/10 09:54:04 tobias Exp $	*/
+/*	$OpenBSD: commit.c,v 1.125 2008/01/31 22:11:38 joris Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  * Copyright (c) 2006 Xavier Santolaria <xsa@openbsd.org>
@@ -42,7 +42,7 @@ int	conflicts_found;
 char	*logmsg = NULL;
 
 struct cvs_cmd cvs_cmd_commit = {
-	CVS_OP_COMMIT, 0, "commit",
+	CVS_OP_COMMIT, CVS_USE_WDIR, "commit",
 	{ "ci", "com" },
 	"Check files into the repository",
 	"[-flR] [-F logfile | -m msg] [-r rev] ...",
@@ -54,17 +54,22 @@ struct cvs_cmd cvs_cmd_commit = {
 int
 cvs_commit(int argc, char **argv)
 {
-	int ch;
+	int ch, Fflag, mflag;
 	char *arg = ".";
 	int flags;
 	struct cvs_recursion cr;
 
 	flags = CR_RECURSE_DIRS;
+	Fflag = mflag = 0;
 
 	while ((ch = getopt(argc, argv, cvs_cmd_commit.cmd_opts)) != -1) {
 		switch (ch) {
 		case 'F':
+			/* free previously assigned value */
+			if (logmsg != NULL)
+				xfree(logmsg);
 			logmsg = cvs_logmsg_read(optarg);
+			Fflag = 1;
 			break;
 		case 'f':
 			break;
@@ -72,9 +77,14 @@ cvs_commit(int argc, char **argv)
 			flags &= ~CR_RECURSE_DIRS;
 			break;
 		case 'm':
+			/* free previously assigned value */
+			if (logmsg != NULL)
+				xfree(logmsg);
 			logmsg = xstrdup(optarg);
+			mflag = 1;
 			break;
 		case 'R':
+			flags |= CR_RECURSE_DIRS;
 			break;
 		case 'r':
 			break;
@@ -85,6 +95,10 @@ cvs_commit(int argc, char **argv)
 
 	argc -= optind;
 	argv += optind;
+
+	/* -F and -m are mutually exclusive */
+	if (Fflag && mflag)
+		fatal("cannot specify both a log file and a message");
 
 	TAILQ_INIT(&files_affected);
 	TAILQ_INIT(&files_added);
@@ -133,9 +147,7 @@ cvs_commit(int argc, char **argv)
 		if (!(flags & CR_RECURSE_DIRS))
 			cvs_client_send_request("Argument -l");
 
-		if (logmsg != NULL)
-			cvs_client_send_logmsg(logmsg);
-
+		cvs_client_send_logmsg(logmsg);
 		cvs_client_send_files(argv, argc);
 		cvs_client_senddir(".");
 		cvs_client_send_request("ci");
@@ -146,6 +158,7 @@ cvs_commit(int argc, char **argv)
 		cvs_file_freelist(&files_affected);
 	}
 
+	xfree(logmsg);
 	return (0);
 }
 
@@ -155,6 +168,8 @@ cvs_commit_check_files(struct cvs_file *cf)
 	char *tag;
 	RCSNUM *branch, *brev;
 	char rev[CVS_REV_BUFSZ];
+
+	branch = brev = NULL;
 
 	cvs_log(LP_TRACE, "cvs_commit_check_files(%s)", cf->file_path);
 
@@ -203,6 +218,7 @@ cvs_commit_check_files(struct cvs_file *cf)
 			if (brev != NULL) {
 				if (RCSNUM_ISBRANCH(brev))
 					goto next;
+				rcsnum_free(brev);
 			}
 
 			brev = rcs_translate_tag(tag, cf->file_rcs);
@@ -217,6 +233,7 @@ cvs_commit_check_files(struct cvs_file *cf)
 				cvs_log(LP_ERR, "%s is not a branch revision",
 				    rev);
 				conflicts_found++;
+				rcsnum_free(brev);
 				return;
 			}
 
@@ -224,6 +241,8 @@ cvs_commit_check_files(struct cvs_file *cf)
 				cvs_log(LP_ERR, "%s is not a branch revision",
 				    rev);
 				conflicts_found++;
+				rcsnum_free(branch);
+				rcsnum_free(brev);
 				return;
 			}
 
@@ -232,12 +251,19 @@ cvs_commit_check_files(struct cvs_file *cf)
 				cvs_log(LP_ERR, "%s (%s) is not a branch",
 				    cf->file_ent->ce_tag, rev);
 				conflicts_found++;
+				rcsnum_free(branch);
+				rcsnum_free(brev);
 				return;
 			}
 		}
 	}
 
 next:
+	if (branch != NULL)
+		rcsnum_free(branch);
+	if (brev != NULL)
+		rcsnum_free(brev);
+
 	if (cf->file_status == FILE_ADDED ||
 	    cf->file_status == FILE_REMOVED ||
 	    cf->file_status == FILE_MODIFIED)
@@ -264,7 +290,7 @@ cvs_commit_local(struct cvs_file *cf)
 	int onbranch, isnew, histtype;
 	RCSNUM *nrev, *crev, *rrev, *brev;
 	int openflags, rcsflags;
-	char rbuf[24], nbuf[24];
+	char rbuf[CVS_REV_BUFSZ], nbuf[CVS_REV_BUFSZ];
 	CVSENTRIES *entlist;
 	char attic[MAXPATHLEN], repo[MAXPATHLEN], rcsfile[MAXPATHLEN];
 
@@ -326,6 +352,7 @@ cvs_commit_local(struct cvs_file *cf)
 				nrev = rcsnum_brtorev(brev);
 				if (nrev == NULL)
 					fatal("failed to create branch rev");
+				rcsnum_free(brev);
 			} else {
 				fatal("this isnt suppose to happen, honestly");
 			}
@@ -342,6 +369,8 @@ cvs_commit_local(struct cvs_file *cf)
 		strlcpy(rbuf, "Non-existent", sizeof(rbuf));
 	}
 
+	if (rrev != NULL)
+		rcsnum_free(rrev);
 	isnew = 0;
 	if (cf->file_status == FILE_ADDED) {
 		isnew = 1;
@@ -498,6 +527,9 @@ cvs_commit_local(struct cvs_file *cf)
 		break;
 	}
 
+	if (crev != NULL)
+		rcsnum_free(crev);
+
 	cvs_history_add(histtype, cf, NULL);
 }
 
@@ -505,17 +537,17 @@ static BUF *
 commit_diff(struct cvs_file *cf, RCSNUM *rev, int reverse)
 {
 	char *p1, *p2, *p;
-	BUF *b1, *b2;
+	BUF *b;
 
 	(void)xasprintf(&p1, "%s/diff1.XXXXXXXXXX", cvs_tmpdir);
 
 	if (cf->file_status == FILE_MODIFIED ||
 	    cf->file_status == FILE_ADDED) {
-		if ((b1 = cvs_buf_load_fd(cf->fd, BUF_AUTOEXT)) == NULL)
-			fatal("commit_diff_file: failed to load '%s'",
+		if ((b = cvs_buf_load_fd(cf->fd, BUF_AUTOEXT)) == NULL)
+			fatal("commit_diff: failed to load '%s'",
 			    cf->file_path);
-		cvs_buf_write_stmp(b1, p1, NULL);
-		cvs_buf_free(b1);
+		cvs_buf_write_stmp(b, p1, NULL);
+		cvs_buf_free(b);
 	} else {
 		rcs_rev_write_stmp(cf->file_rcs, rev, p1, 0);
 	}
@@ -523,7 +555,7 @@ commit_diff(struct cvs_file *cf, RCSNUM *rev, int reverse)
 	(void)xasprintf(&p2, "%s/diff2.XXXXXXXXXX", cvs_tmpdir);
 	rcs_rev_write_stmp(cf->file_rcs, rev, p2, RCS_KWEXP_NONE);
 
-	if ((b2 = cvs_buf_alloc(128, BUF_AUTOEXT)) == NULL)
+	if ((b = cvs_buf_alloc(128, BUF_AUTOEXT)) == NULL)
 		fatal("commit_diff: failed to create diff buf");
 
 	diff_format = D_RCSDIFF;
@@ -534,13 +566,13 @@ commit_diff(struct cvs_file *cf, RCSNUM *rev, int reverse)
 		p2 = p;
 	}
 
-	if (cvs_diffreg(p1, p2, b2) == D_ERROR)
+	if (cvs_diffreg(p1, p2, b) == D_ERROR)
 		fatal("commit_diff: failed to get RCS patch");
 
 	xfree(p1);
 	xfree(p2);
 
-	return (b2);
+	return (b);
 }
 
 static void

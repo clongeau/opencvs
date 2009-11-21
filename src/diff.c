@@ -1,4 +1,4 @@
-/*	$OpenBSD: diff.c,v 1.121 2007/09/22 16:01:22 joris Exp $	*/
+/*	$OpenBSD: diff.c,v 1.124 2008/01/31 10:15:05 tobias Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -32,10 +32,10 @@ static char *rev1 = NULL;
 static char *rev2 = NULL;
 
 struct cvs_cmd cvs_cmd_diff = {
-	CVS_OP_DIFF, 0, "diff",
+	CVS_OP_DIFF, CVS_USE_WDIR, "diff",
 	{ "di", "dif" },
 	"Show differences between revisions",
-	"[-cilNnpu] [[-D date] [-r rev] [-D date2 | -r rev2]] "
+	"[-cilNnpRu] [[-D date] [-r rev] [-D date2 | -r rev2]] "
 	"[-k mode] [file ...]",
 	"cD:iklNnpr:Ru",
 	NULL,
@@ -73,6 +73,9 @@ cvs_diff(int argc, char **argv)
 		case 'p':
 			strlcat(diffargs, " -p", sizeof(diffargs));
 			diff_pflag = 1;
+			break;
+		case 'R':
+			flags |= CR_RECURSE_DIRS;
 			break;
 		case 'r':
 			if (rev1 == NULL) {
@@ -199,8 +202,11 @@ cvs_diff_local(struct cvs_file *cf)
 			return;
 
 	if (rev2 != NULL)
-		if ((diff_rev2 = rcs_translate_tag(rev2, cf->file_rcs)) == NULL)
+		if ((diff_rev2 = rcs_translate_tag(rev2, cf->file_rcs)) ==
+		    NULL) {
+			rcsnum_free(diff_rev1);
 			return;
+		}
 
 	diff_file = cf->file_path;
 	cvs_printf("Index: %s\n%s\nRCS file: %s\n", cf->file_path,

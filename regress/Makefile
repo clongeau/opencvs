@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.11 2008/01/10 12:30:09 tobias Exp $
+#	$OpenBSD: Makefile,v 1.15 2008/02/01 13:36:43 tobias Exp $
 
 # Regression tests by Niall O'Higgins <niallo@openbsd.org> and
 # Tobias Stoeckmann <tobias@openbsd.org>.
@@ -32,23 +32,22 @@ LTESTS= cvs-initial \
 	cvs-annotate \
 	cvs-annotate-rflag-inval_branch_rev \
 	cvs-annotate-rflag-inval_branch_rev-fflag \
+	cvs-annotate-rflag-unknown_symbol-fflag \
 	cvs-checkout-rflag-1.1 \
 	cvs-update-Aflag \
 	cvs-status \
 	cvs-diff \
 	cvs-remove-fflag \
 	cvs-status-vflag \
-	cvs-rtag-one_more_branch
+	cvs-log \
+	cvs-rlog \
+	cvs-rtag-one_more_branch \
+	cvs-export
 # Known to fail.
 #	cvs-checkout-dflag
-#	cvs-rlog
 #	cvs-update-for_subdir
 # Known to behave unconform to GNU cvs.
-#	cvs-annotate-rflag-unknown_symbol-fflag
 #	cvs-diff-file
-#	cvs-export
-#	cvs-log
-#	cvs-rlog
 
 tests:
 	@for t in ${LTESTS}; do \
@@ -180,8 +179,8 @@ test-cvs-commit-to_branch:
 	    -m'first branch seed' > /dev/null
 	@eval 'test `cat ${.OBJDIR}/regress_cvs_root/seed/seed1.txt,v | wc -l` \
 	    -eq 80'
-#	@eval 'test `grep -c TFIRST_BRANCH \
-#	    ${.OBJDIR}/regress_cvs_wcopy/seed/CVS/Entries` -eq 2'
+	@eval 'test `grep -c TFIRST_BRANCH \
+	    ${.OBJDIR}/regress_cvs_wcopy/seed/CVS/Entries` -eq 2'
 
 test-cvs-diff:
 	@sleep 1
@@ -193,9 +192,10 @@ test-cvs-diff-file:
 	@cd ${.OBJDIR}/regress_cvs_wcopy/seed; ${CVS} -Q diff seed1.txt
 
 test-cvs-export:
+	@rm -rf ${.OBJDIR}/regress_cvs_wcopy
 	@mkdir ${.OBJDIR}/regress_cvs_wcopy; \
 	    cd ${.OBJDIR}/regress_cvs_wcopy; \
-	    ${CVS} -Q -d ${MYCVSROOT} export
+	    ${CVS} -Q -d ${MYCVSROOT} export -r HEAD seed > /dev/null
 	@test -f ${.OBJDIR}/regress_cvs_wcopy/seed/seed1.txt
 
 test-cvs-import-mflag:
@@ -209,13 +209,14 @@ test-cvs-initial: clean
 	@test -d ${.OBJDIR}/regress_cvs_root/CVSROOT
 
 test-cvs-log:
-	@cd ${.OBJDIR}/regress_cvs_wcopy/seed; ${CVS} -Q log
+	@cd ${.OBJDIR}/regress_cvs_wcopy/seed; \
+	    eval 'test `${CVS} -Q log | wc -l` -eq 68'
 
 test-cvs-remove-fflag:
 	@cd ${.OBJDIR}/regress_cvs_wcopy/seed; ${CVS} -Q remove -f seed1.txt
 
 test-cvs-rlog:
-	@${CVS} -Q -d ${MYCVSROOT} rlog seed
+	@eval 'test `${CVS} -Q -d ${MYCVSROOT} rlog seed | wc -l` -eq 65'
 
 test-cvs-status:
 	@cd ${.OBJDIR}/regress_cvs_wcopy/seed; \

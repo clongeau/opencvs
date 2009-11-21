@@ -1,4 +1,4 @@
-/*	$OpenBSD: add.c,v 1.86 2008/01/10 10:08:22 tobias Exp $	*/
+/*	$OpenBSD: add.c,v 1.89 2008/01/31 10:17:47 tobias Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  * Copyright (c) 2005, 2006 Xavier Santolaria <xsa@openbsd.org>
@@ -41,7 +41,7 @@ static char	 kbuf[8], *koptstr;
 char	*logmsg;
 
 struct cvs_cmd cvs_cmd_add = {
-	CVS_OP_ADD, 0, "add",
+	CVS_OP_ADD, CVS_USE_WDIR, "add",
 	{ "ad", "new" },
 	"Add a new file or directory to the repository",
 	"[-k mode] [-m message] ...",
@@ -72,7 +72,7 @@ cvs_add(int argc, char **argv)
 			(void)xsnprintf(kbuf, sizeof(kbuf), "-k%s", koptstr);
 			break;
 		case 'm':
-			logmsg = xstrdup(optarg);
+			logmsg = optarg;
 			break;
 		default:
 			fatal("%s", cvs_cmd_add.cmd_synopsis);
@@ -128,7 +128,7 @@ cvs_add_entry(struct cvs_file *cf)
 
 	if (cf->file_type == CVS_DIR) {
 		(void)xsnprintf(entry, CVS_ENT_MAXLINELEN,
-		    "D/%s/////", cf->file_name);
+		    "D/%s////", cf->file_name);
 
 		entlist = cvs_ent_open(cf->file_wd);
 		cvs_ent_add(entlist, entry);
@@ -243,7 +243,7 @@ add_directory(struct cvs_file *cf)
 
 			p = xmalloc(CVS_ENT_MAXLINELEN);
 			(void)xsnprintf(p, CVS_ENT_MAXLINELEN,
-			    "D/%s/////", cf->file_name);
+			    "D/%s////", cf->file_name);
 			entlist = cvs_ent_open(cf->file_wd);
 			cvs_ent_add(entlist, p);
 			cvs_ent_close(entlist, ENT_SYNC);

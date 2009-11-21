@@ -1,4 +1,4 @@
-/*	$OpenBSD: annotate.c,v 1.43 2007/10/09 12:59:53 tobias Exp $	*/
+/*	$OpenBSD: annotate.c,v 1.47 2008/02/01 17:18:59 tobias Exp $	*/
 /*
  * Copyright (c) 2007 Tobias Stoeckmann <tobias@openbsd.org>
  * Copyright (c) 2006 Xavier Santolaria <xsa@openbsd.org>
@@ -18,6 +18,7 @@
 
 #include <sys/param.h>
 
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -33,8 +34,18 @@ extern char	*cvs_specified_tag;
 static int	 force_head = 0;
 
 struct cvs_cmd cvs_cmd_annotate = {
-	CVS_OP_ANNOTATE, 0, "annotate",
+	CVS_OP_ANNOTATE, CVS_USE_WDIR, "annotate",
 	{ "ann", "blame" },
+	"Show last revision where each line was modified",
+	"[-flR] [-D date | -r rev] [file ...]",
+	"D:flRr:",
+	NULL,
+	cvs_annotate
+};
+
+struct cvs_cmd cvs_cmd_rannotate = {
+	CVS_OP_RANNOTATE, 0, "rannotate",
+	{ "rann", "ra" },
 	"Show last revision where each line was modified",
 	"[-flR] [-D date | -r rev] [file ...]",
 	"D:flRr:",
@@ -62,6 +73,7 @@ cvs_annotate(int argc, char **argv)
 			flags &= ~CR_RECURSE_DIRS;
 			break;
 		case 'R':
+			flags |= CR_RECURSE_DIRS;
 			break;
 		case 'r':
 			cvs_specified_tag = optarg;
@@ -73,6 +85,9 @@ cvs_annotate(int argc, char **argv)
 
 	argc -= optind;
 	argv += optind;
+
+	if (cvs_cmdop == CVS_OP_RANNOTATE)
+		flags |= CR_REPO;
 
 	cr.enterdir = NULL;
 	cr.leavedir = NULL;
@@ -91,20 +106,30 @@ cvs_annotate(int argc, char **argv)
 			cvs_client_send_request("Argument -r%s",
 			    cvs_specified_tag);
 	} else {
+		if (cvs_cmdop == CVS_OP_RANNOTATE &&
+		    chdir(current_cvsroot->cr_dir) == -1)
+			fatal("cvs_annotate: %s", strerror(errno));
+
 		cr.fileproc = cvs_annotate_local;
 	}
 
 	cr.flags = flags;
 
-	if (argc > 0)
-		cvs_file_run(argc, argv, &cr);
-	else
-		cvs_file_run(1, &arg, &cr);
+	if (cvs_cmdop == CVS_OP_ANNOTATE ||
+	    current_cvsroot->cr_method == CVS_METHOD_LOCAL) {
+		if (argc > 0)
+			cvs_file_run(argc, argv, &cr);
+		else
+			cvs_file_run(1, &arg, &cr);
+	}
 
 	if (current_cvsroot->cr_method != CVS_METHOD_LOCAL) {
 		cvs_client_send_files(argv, argc);
 		cvs_client_senddir(".");
-		cvs_client_send_request("annotate");
+
+		cvs_client_send_request((cvs_cmdop == CVS_OP_RANNOTATE) ?
+		    "rannotate" : "annotate");
+
 		cvs_client_get_responses();
 	}
 
@@ -135,6 +160,12 @@ cvs_annotate_local(struct cvs_file *cf)
 				/* Stick at weird GNU cvs, ignore error. */
 				return;
 
+			/* -f is not allowed for unknown symbols */
+			rev = rcsnum_parse(cvs_specified_tag);
+			if (rev == NULL)
+				fatal("no such tag %s", cvs_specified_tag);
+
+			rcsnum_free(rev);
 			rev = rcsnum_alloc();
 			rcsnum_cpy(cf->file_rcs->rf_head, rev, 0);
 		}

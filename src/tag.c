@@ -1,4 +1,4 @@
-/*	$OpenBSD: tag.c,v 1.61 2008/01/10 11:25:27 tobias Exp $	*/
+/*	$OpenBSD: tag.c,v 1.64 2008/01/31 22:09:05 xsa Exp $	*/
 /*
  * Copyright (c) 2006 Xavier Santolaria <xsa@openbsd.org>
  *
@@ -49,7 +49,7 @@ struct cvs_cmd cvs_cmd_rtag = {
 };
 
 struct cvs_cmd cvs_cmd_tag = {
-	CVS_OP_TAG, 0, "tag",
+	CVS_OP_TAG, CVS_USE_WDIR, "tag",
 	{ "ta", "freeze" },
 	"Add a symbolic tag to checked out version of files",
 	"[-bcdFflR] [-D date | -r rev] tag [file ...]",
@@ -88,6 +88,7 @@ cvs_tag(int argc, char **argv)
 			flags &= ~CR_RECURSE_DIRS;
 			break;
 		case 'R':
+			flags |= CR_RECURSE_DIRS;
 			break;
 		case 'r':
 			tag_oldname = optarg;
@@ -101,9 +102,11 @@ cvs_tag(int argc, char **argv)
 	argv += optind;
 
 	if (cvs_cmdop == CVS_OP_RTAG) {
+		flags |= CR_REPO;
+
 		if (argc < 2)
 			fatal("%s", cvs_cmd_rtag.cmd_synopsis);
-        
+
                 for (i = 1; i < argc; i++)
                         if (argv[i][0] == '/')
                                 fatal("Absolute path name is invalid: %s",

@@ -10,12 +10,10 @@
 /diff.h/1.14/Tue Aug 21 12:44:30 2007//THEAD
 /diff3.c/1.39/Wed Sep 19 20:49:47 2007//THEAD
 /fatal.c/1.13/Wed Sep 19 20:49:47 2007//THEAD
-/history.c/1.34/Wed Sep 19 20:49:47 2007//THEAD
 /init.c/1.32/Tue Aug 21 12:44:30 2007//THEAD
 /init.h/1.1/Tue Aug 21 12:44:31 2007//THEAD
 /repository.h/1.3/Tue Aug 21 12:44:31 2007//THEAD
 /version.c/1.25/Tue Aug 21 12:44:31 2007//THEAD
-/watch.c/1.17/Tue Aug 21 12:44:31 2007//THEAD
 /worklist.c/1.6/Tue Aug 21 12:44:31 2007//THEAD
 /xmalloc.h/1.3/Tue Aug 21 12:44:31 2007//THEAD
 /cvs.5/1.4/Wed Sep 19 20:58:02 2007//THEAD
@@ -23,41 +21,43 @@
 /config.h/1.1/Fri Sep 21 09:58:56 2007//THEAD
 /remote.c/1.17/Thu Sep 20 19:56:24 2007//THEAD
 /util.h/1.22/Fri Sep 21 13:45:15 2007//THEAD
-/admin.c/1.52/Result of merge//THEAD
-/diff.c/1.121/Wed Sep 26 08:12:23 2007//THEAD
-/diff_internals.c/1.15/Result of merge//THEAD
 /file.h/1.46/Wed Sep 26 08:12:23 2007//THEAD
 /buf.c/1.66/Wed Sep 26 08:12:22 2007//THEAD
 /logmsg.c/1.45/Wed Sep 26 08:12:23 2007//THEAD
 /log.h/1.22/Tue Oct  2 20:29:52 2007//THEAD
 /root.c/1.44/Sat Oct  6 00:33:55 2007//THEAD
-/annotate.c/1.43/Result of merge//THEAD
 /date.y/1.17/Fri Oct 12 15:36:29 2007//THEAD
 /Makefile/1.41/Thu Dec 20 21:51:30 2007//
 /config.c/1.12/Result of merge//THEAD
-/add.c/1.86/Fri Jan 11 07:42:26 2008//THEAD
-/checkout.c/1.107/Result of merge//THEAD
-/client.c/1.89/Result of merge//THEAD
-/cmd.c/1.65/Result of merge//THEAD
-/commit.c/1.117/Fri Jan 11 07:42:26 2008//THEAD
-/cvs.c/1.140/Result of merge//THEAD
-/cvs.h/1.148/Result of merge//THEAD
-/edit.c/1.40/Fri Jan 11 07:42:27 2008//THEAD
 /entries.c/1.86/Result of merge//THEAD
-/file.c/1.209/Result of merge//THEAD
-/getlog.c/1.79/Fri Jan 11 07:42:27 2008//THEAD
-/import.c/1.79/Fri Jan 11 07:42:27 2008//THEAD
 /log.c/1.42/Fri Jan 11 07:42:27 2008//THEAD
-/rcs.c/1.237/Fri Jan 11 07:42:27 2008//THEAD
-/rcs.h/1.84/Result of merge//THEAD
-/rcsnum.c/1.49/Fri Jan 11 07:42:27 2008//THEAD
-/release.c/1.37/Fri Jan 11 07:42:27 2008//THEAD
-/remote.h/1.27/Fri Jan 11 07:42:27 2008//THEAD
-/remove.c/1.67/Fri Jan 11 07:42:27 2008//THEAD
-/repository.c/1.16/Fri Jan 11 07:42:27 2008//THEAD
-/server.c/1.75/Fri Jan 11 07:42:27 2008//THEAD
-/status.c/1.78/Fri Jan 11 07:42:27 2008//THEAD
-/tag.c/1.61/Fri Jan 11 07:42:27 2008//THEAD
-/update.c/1.113/Result of merge//THEAD
-/util.c/1.124/Result of merge//THEAD
+/cvs.c/1.141/Result of merge//THEAD
+/add.c/1.89/Fri Feb  1 19:52:30 2008//THEAD
+/admin.c/1.54/Result of merge//THEAD
+/annotate.c/1.47/Result of merge//THEAD
+/checkout.c/1.115/Result of merge//THEAD
+/client.c/1.94/Result of merge//THEAD
+/cmd.c/1.67/Result of merge//THEAD
+/commit.c/1.125/Fri Feb  1 19:52:30 2008//THEAD
+/cvs.h/1.150/Result of merge//THEAD
+/diff.c/1.124/Fri Feb  1 19:52:30 2008//THEAD
+/diff_internals.c/1.16/Result of merge//THEAD
+/edit.c/1.42/Fri Feb  1 19:52:31 2008//THEAD
+/file.c/1.212/Result of merge//THEAD
+/getlog.c/1.83/Fri Feb  1 19:52:31 2008//THEAD
+/history.c/1.35/Fri Feb  1 19:52:31 2008//THEAD
+/import.c/1.81/Fri Feb  1 19:52:31 2008//THEAD
+/rcs.c/1.243/Fri Feb  1 19:52:31 2008//THEAD
+/rcs.h/1.86/Result of merge//THEAD
+/rcsnum.c/1.50/Fri Feb  1 19:52:31 2008//THEAD
+/release.c/1.38/Fri Feb  1 19:52:31 2008//THEAD
+/remote.h/1.29/Fri Feb  1 19:52:31 2008//THEAD
+/remove.c/1.69/Fri Feb  1 19:52:31 2008//THEAD
+/repository.c/1.17/Fri Feb  1 19:52:31 2008//THEAD
+/server.c/1.80/Fri Feb  1 19:52:31 2008//THEAD
+/status.c/1.80/Fri Feb  1 19:52:31 2008//THEAD
+/tag.c/1.64/Fri Feb  1 19:52:31 2008//THEAD
+/update.c/1.117/Result of merge//THEAD
+/util.c/1.129/Result of merge//THEAD
+/watch.c/1.20/Fri Feb  1 19:52:31 2008//THEAD
 D

@@ -1,4 +1,4 @@
-/*	$OpenBSD: add.c,v 1.105 2008/06/15 04:38:52 tobias Exp $	*/
+/*	$OpenBSD: add.c,v 1.109 2010/07/23 21:46:04 ray Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  * Copyright (c) 2005, 2006 Xavier Santolaria <xsa@openbsd.org>
@@ -37,6 +37,7 @@ static void add_file(struct cvs_file *);
 static void add_entry(struct cvs_file *);
 
 int		kflag = 0;
+static u_int	added_files = 0;
 static char	kbuf[8];
 
 extern char	*logmsg;
@@ -109,6 +110,12 @@ cvs_add(int argc, char **argv)
 	cr.flags = flags;
 
 	cvs_file_run(argc, argv, &cr);
+
+	if (added_files != 0) {
+		cvs_log(LP_NOTICE, "use '%s commit' to add %s "
+		    "permanently", __progname,
+		    (added_files == 1) ? "this file" : "these files");
+	}
 
 	if (current_cvsroot->cr_method != CVS_METHOD_LOCAL) {
 		cvs_client_senddir(".");
@@ -203,19 +210,19 @@ cvs_add_loginfo(char *repo)
 	if (getcwd(pwd, sizeof(pwd)) == NULL)
 		fatal("Can't get working directory");
 
-	buf = cvs_buf_alloc(1024);
+	buf = buf_alloc(1024);
 
 	cvs_trigger_loginfo_header(buf, repo);
 
-	cvs_buf_puts(buf, "Log Message:\nDirectory ");
-	cvs_buf_puts(buf, current_cvsroot->cr_dir);
-	cvs_buf_putc(buf, '/');
-	cvs_buf_puts(buf, repo);
-	cvs_buf_puts(buf, " added to the repository\n");
+	buf_puts(buf, "Log Message:\nDirectory ");
+	buf_puts(buf, current_cvsroot->cr_dir);
+	buf_putc(buf, '/');
+	buf_puts(buf, repo);
+	buf_puts(buf, " added to the repository\n");
 
-	cvs_buf_putc(buf, '\0');
+	buf_putc(buf, '\0');
 
-	loginfo = cvs_buf_release(buf);
+	loginfo = buf_release(buf);
 }
 
 void
@@ -276,7 +283,7 @@ cvs_add_tobranch(struct cvs_file *cf, char *tag)
 	if ((rdp = rcs_findrev(cf->file_rcs, cf->file_rcs->rf_head)) == NULL)
 		fatal("cvs_add_tobranch: cannot find newly added revision");
 
-	bp = cvs_buf_alloc(1);
+	bp = buf_alloc(1);
 
 	if (rcs_deltatext_set(cf->file_rcs,
 	    cf->file_rcs->rf_head, bp) == -1)
@@ -405,7 +412,7 @@ add_directory(struct cvs_file *cf)
 static void
 add_file(struct cvs_file *cf)
 {
-	int added, nb, stop;
+	int nb, stop;
 	char revbuf[CVS_REV_BUFSZ];
 	RCSNUM *head = NULL;
 	char *tag;
@@ -425,7 +432,7 @@ add_file(struct cvs_file *cf)
 		rcsnum_tostr(head, revbuf, sizeof(revbuf));
 	}
 
-	added = stop = 0;
+	stop = 0;
 	switch (cf->file_status) {
 	case FILE_ADDED:
 	case FILE_CHECKOUT:
@@ -438,7 +445,7 @@ add_file(struct cvs_file *cf)
 		if (cf->file_rcs == NULL) {
 			cvs_log(LP_NOTICE, "cannot resurrect %s; "
 			    "RCS file removed by second party", cf->file_name);
-		} else if (cf->fd == -1) {
+		} else if (!(cf->file_flags & FILE_ON_DISK)) {
 			add_entry(cf);
 
 			/* Restore the file. */
@@ -468,11 +475,11 @@ add_file(struct cvs_file *cf)
 			cvs_log(LP_NOTICE, "re-adding file %s "
 			    "(instead of dead revision %s)",
 			    cf->file_path, revbuf);
-			added++;
-		} else if (cf->fd != -1) {
+			added_files++;
+		} else if (cf->file_flags & FILE_ON_DISK) {
 			cvs_log(LP_NOTICE, "scheduling file '%s' for addition",
 			    cf->file_path);
-			added++;
+			added_files++;
 		} else {
 			stop = 1;
 		}
@@ -488,12 +495,6 @@ add_file(struct cvs_file *cf)
 		return;
 
 	add_entry(cf);
-
-	if (added != 0) {
-		cvs_log(LP_NOTICE, "use '%s commit' to add %s "
-		    "permanently", __progname,
-		    (added == 1) ? "this file" : "these files");
-	}
 }
 
 static void
@@ -558,8 +559,8 @@ add_entry(struct cvs_file *cf)
 
 	if (cvs_server_active) {
 		cvs_server_send_response("Checked-in %s/", cf->file_wd);
-		cvs_server_send_response(cf->file_path);
-		cvs_server_send_response(entry);
+		cvs_server_send_response("%s", cf->file_path);
+		cvs_server_send_response("%s", entry);
 	} else {
 		entlist = cvs_ent_open(cf->file_wd);
 		cvs_ent_add(entlist, entry);

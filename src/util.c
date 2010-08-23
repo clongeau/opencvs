@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.147 2008/06/21 15:39:15 joris Exp $	*/
+/*	$OpenBSD: util.c,v 1.152 2010/07/23 21:46:05 ray Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * Copyright (c) 2005, 2006 Joris Vink <joris@openbsd.org>
@@ -588,8 +588,7 @@ cvs_mkpath(const char *path, char *tag)
 	FILE *fp;
 	size_t len;
 	struct hash_data *hdata, hd;
-	char *entry, sticky[CVS_REV_BUFSZ];
-	char *sp, *dp, *dir, *p, rpath[MAXPATHLEN], repo[MAXPATHLEN];
+	char *entry, *sp, *dp, *dir, *p, rpath[MAXPATHLEN], repo[MAXPATHLEN];
 
 	hdata = hash_table_find(&created_directories, path, strlen(path));
 	if (hdata != NULL)
@@ -613,7 +612,7 @@ cvs_mkpath(const char *path, char *tag)
 	repo[0] = '\0';
 	rpath[0] = '\0';
 
-	if (cvs_cmdop == CVS_OP_UPDATE || cvs_cmdop == CVS_OP_COMMIT) {
+	if ((cvs_cmdop != CVS_OP_CHECKOUT) && (cvs_cmdop != CVS_OP_EXPORT)) {
 		if ((fp = fopen(CVS_PATH_REPOSITORY, "r")) != NULL) {
 			if ((fgets(repo, sizeof(repo), fp)) == NULL)
 				fatal("cvs_mkpath: bad repository file");
@@ -677,14 +676,6 @@ cvs_mkpath(const char *path, char *tag)
 			if (p != NULL)
 				*p = '/';
 		}
-
-		if (cvs_server_active == 1 && strcmp(rpath, ".")) {
-			if (tag != NULL) {
-				(void)xsnprintf(sticky, sizeof(sticky),
-				    "T%s", tag);
-				cvs_server_set_sticky(rpath, sticky);
-			}
-		}
 	}
 
 	xfree(dir);
@@ -693,13 +684,13 @@ cvs_mkpath(const char *path, char *tag)
 /*
  * Split the contents of a file into a list of lines.
  */
-struct cvs_lines *
+struct rcs_lines *
 cvs_splitlines(u_char *data, size_t len)
 {
 	u_char *p, *c;
 	size_t i, tlen;
-	struct cvs_lines *lines;
-	struct cvs_line *lp;
+	struct rcs_lines *lines;
+	struct rcs_line *lp;
 
 	lines = xcalloc(1, sizeof(*lines));
 	TAILQ_INIT(&(lines->l_lines));
@@ -725,9 +716,9 @@ cvs_splitlines(u_char *data, size_t len)
 }
 
 void
-cvs_freelines(struct cvs_lines *lines)
+cvs_freelines(struct rcs_lines *lines)
 {
-	struct cvs_line *lp;
+	struct rcs_line *lp;
 
 	while ((lp = TAILQ_FIRST(&(lines->l_lines))) != NULL) {
 		TAILQ_REMOVE(&(lines->l_lines), lp, l_list);
@@ -878,7 +869,8 @@ int
 cvs_exec(char *prog, const char *in, int needwait)
 {
 	pid_t pid;
-	int fds[2], size, st;
+	size_t size;
+	int fds[2], st;
 	char *argp[4] = { "sh", "-c", prog, NULL };
 
 	if (in != NULL && pipe(fds) < 0) {

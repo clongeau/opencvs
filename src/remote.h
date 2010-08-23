@@ -1,4 +1,4 @@
-/*	$OpenBSD: remote.h,v 1.34 2008/07/08 12:54:50 joris Exp $	*/
+/*	$OpenBSD: remote.h,v 1.37 2009/04/04 11:29:57 joris Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -44,13 +44,15 @@ extern int server_response;
 #define SERVER_OK	0
 #define SERVER_ERROR	1
 
-#define CVS_SERVER_UNCHANGED	"d[o.o]b"
-#define CVS_SERVER_UPTODATE	(time_t)-2
+#define CVS_SERVER_UNCHANGED		"d[o.o]b"
+#define CVS_SERVER_UPTODATE		(time_t)-2
+#define CVS_SERVER_QUESTIONABLE		'?'
 
 void	cvs_client_connect_to_server(void);
 void	cvs_client_disconnect(void);
 void	cvs_client_send_logmsg(char *);
-void	cvs_client_send_request(char *, ...);
+void	cvs_client_send_request(char *, ...)
+	__attribute__((format(printf, 1, 2)));
 void	cvs_client_read_response(void);
 void	cvs_client_get_responses(void);
 
@@ -74,7 +76,8 @@ void	cvs_client_sendfile(struct cvs_file *);
 void	cvs_client_send_files(char **, int);
 
 void	cvs_server_root(char *);
-void	cvs_server_send_response(char *, ...);
+void	cvs_server_send_response(char *, ...)
+	__attribute__((format(printf, 1, 2)));
 void	cvs_server_validresp(char *);
 void	cvs_server_validreq(char *);
 void	cvs_server_globalopt(char *);
@@ -93,6 +96,7 @@ void	cvs_server_update_patches(char *);
 void	cvs_server_update_entry(const char *, struct cvs_file *cf);
 void	cvs_server_set_sticky(const char *, const char *);
 void	cvs_server_clear_sticky(char *);
+void	cvs_server_exp_modules(char *);
 
 void	cvs_server_add(char *);
 void	cvs_server_import(char *);

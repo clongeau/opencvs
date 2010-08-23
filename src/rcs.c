@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcs.c,v 1.278 2008/06/26 21:31:40 joris Exp $	*/
+/*	$OpenBSD: rcs.c,v 1.298 2010/07/31 11:37:37 nicm Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -80,8 +80,6 @@
 
 /* opaque parse data */
 struct rcs_pdata {
-	u_int	rp_lines;
-
 	char	*rp_buf;
 	size_t	 rp_blen;
 	char	*rp_bufend;
@@ -213,8 +211,8 @@ static struct rcs_key {
 #define RCS_NKEYS	(sizeof(rcs_keys)/sizeof(rcs_keys[0]))
 
 static RCSNUM	*rcs_get_revision(const char *, RCSFILE *);
-int		rcs_patch_lines(struct cvs_lines *, struct cvs_lines *,
-		    struct cvs_line **, struct rcs_delta *);
+int		rcs_patch_lines(struct rcs_lines *, struct rcs_lines *,
+		    struct rcs_line **, struct rcs_delta *);
 static void	rcs_parse_init(RCSFILE *);
 static int	rcs_parse_admin(RCSFILE *);
 static int	rcs_parse_delta(RCSFILE *);
@@ -234,8 +232,8 @@ static int	rcs_pushtok(RCSFILE *, const char *, int);
 static void	rcs_growbuf(RCSFILE *);
 static void	rcs_strprint(const u_char *, size_t, FILE *);
 
-static void	rcs_kwexp_line(char *, struct rcs_delta *, struct cvs_lines *,
-		    struct cvs_line *, int mode);
+static void	rcs_kwexp_line(char *, struct rcs_delta *, struct rcs_lines *,
+		    struct rcs_line *, int mode);
 
 static int rcs_ignore_keys = 0;
 
@@ -368,7 +366,7 @@ void
 rcs_write(RCSFILE *rfp)
 {
 	FILE *fp;
-	char buf[1024], numbuf[CVS_REV_BUFSZ], *fn, tmpdir[MAXPATHLEN];
+	char   numbuf[CVS_REV_BUFSZ], *fn, tmpdir[MAXPATHLEN];
 	struct rcs_access *ap;
 	struct rcs_sym *symp;
 	struct rcs_branch *brp;
@@ -401,6 +399,8 @@ rcs_write(RCSFILE *rfp)
 		fatal("fdopen %s: %s", fn, strerror(saved_errno));
 	}
 
+	worklist_add(fn, &temp_files);
+
 	if (rfp->rf_head != NULL)
 		rcsnum_tostr(rfp->rf_head, numbuf, sizeof(numbuf));
 	else
@@ -424,11 +424,7 @@ rcs_write(RCSFILE *rfp)
 		if (RCSNUM_ISBRANCH(symp->rs_num))
 			rcsnum_addmagic(symp->rs_num);
 		rcsnum_tostr(symp->rs_num, numbuf, sizeof(numbuf));
-		if (strlcpy(buf, symp->rs_name, sizeof(buf)) >= sizeof(buf) ||
-		    strlcat(buf, ":", sizeof(buf)) >= sizeof(buf) ||
-		    strlcat(buf, numbuf, sizeof(buf)) >= sizeof(buf))
-			fatal("rcs_write: string overflow");
-		fprintf(fp, "\n\t%s", buf);
+		fprintf(fp, "\n\t%s:%s", symp->rs_name, numbuf);
 	}
 	fprintf(fp, ";\n");
 
@@ -496,13 +492,12 @@ rcs_write(RCSFILE *rfp)
 		if (rdp->rd_log != NULL) {
 			len = strlen(rdp->rd_log);
 			rcs_strprint((const u_char *)rdp->rd_log, len, fp);
-			if (rdp->rd_log[len-1] != '\n')
+			if (len == 0 || rdp->rd_log[len-1] != '\n')
 				fputc('\n', fp);
 		}
 		fputs("@\ntext\n@", fp);
-		if (rdp->rd_text != NULL) {
+		if (rdp->rd_text != NULL)
 			rcs_strprint(rdp->rd_text, rdp->rd_tlen, fp);
-		}
 		fputs("@\n", fp);
 	}
 
@@ -612,12 +607,14 @@ rcs_branch_new(RCSFILE *file, RCSNUM *rev)
 			if (!rcsnum_cmp(sym->rs_num, brev, 0))
 				break;
 
-		if (sym != NULL) {
-			if (rcsnum_inc(brev) == NULL ||
-			    rcsnum_inc(brev) == NULL)
-				return (NULL);
-		} else
+		if (sym == NULL)
 			break;
+
+		if (rcsnum_inc(brev) == NULL ||
+		    rcsnum_inc(brev) == NULL) {
+			rcsnum_free(brev);
+			return (NULL);
+		}
 	}
 
 	return (brev);
@@ -1028,12 +1025,12 @@ rcs_comment_set(RCSFILE *file, const char *comment)
 }
 
 int
-rcs_patch_lines(struct cvs_lines *dlines, struct cvs_lines *plines,
-    struct cvs_line **alines, struct rcs_delta *rdp)
+rcs_patch_lines(struct rcs_lines *dlines, struct rcs_lines *plines,
+    struct rcs_line **alines, struct rcs_delta *rdp)
 {
 	u_char op;
 	char *ep;
-	struct cvs_line *lp, *dlp, *ndlp;
+	struct rcs_line *lp, *dlp, *ndlp;
 	int i, lineno, nbln;
 	u_char tmp;
 
@@ -1067,7 +1064,7 @@ rcs_patch_lines(struct cvs_lines *dlines, struct cvs_lines *plines,
 			if (dlp->l_lineno == lineno)
 				break;
 			if (dlp->l_lineno > lineno) {
-				dlp = TAILQ_PREV(dlp, cvs_tqh, l_list);
+				dlp = TAILQ_PREV(dlp, tqh, l_list);
 			} else if (dlp->l_lineno < lineno) {
 				if (((ndlp = TAILQ_NEXT(dlp, l_list)) == NULL) ||
 				    ndlp->l_lineno > lineno)
@@ -1092,7 +1089,7 @@ rcs_patch_lines(struct cvs_lines *dlines, struct cvs_lines *plines,
 				/* last line is gone - reset dlp */
 				if (dlp == NULL) {
 					ndlp = TAILQ_LAST(&(dlines->l_lines),
-					    cvs_tqh);
+					    tqh);
 					dlp = ndlp;
 				}
 			}
@@ -1139,8 +1136,8 @@ rcs_patch_lines(struct cvs_lines *dlines, struct cvs_lines *plines,
 void
 rcs_delta_stats(struct rcs_delta *rdp, int *ladded, int *lremoved)
 {
-	struct cvs_lines *plines;
-	struct cvs_line *lp;
+	struct rcs_lines *plines;
+	struct rcs_line *lp;
 	int added, i, lineno, nbln, removed;
 	char op, *ep;
 	u_char tmp;
@@ -1196,13 +1193,12 @@ rcs_delta_stats(struct rcs_delta *rdp, int *ladded, int *lremoved)
  * one).  The <msg> argument specifies the log message for that revision, and
  * <date> specifies the revision's date (a value of -1 is
  * equivalent to using the current time).
- * If <username> is NULL, set the author for this revision to the current user.
- * Otherwise, set it to <username>.
+ * If <author> is NULL, set the author for this revision to the current user.
  * Returns 0 on success, or -1 on failure.
  */
 int
 rcs_rev_add(RCSFILE *rf, RCSNUM *rev, const char *msg, time_t date,
-    const char *username)
+    const char *author)
 {
 	time_t now;
 	RCSNUM *root = NULL;
@@ -1228,9 +1224,6 @@ rcs_rev_add(RCSFILE *rf, RCSNUM *rev, const char *msg, time_t date,
 			return (-1);
 	}
 
-	if ((pw = getpwuid(getuid())) == NULL)
-		fatal("getpwuid failed");
-
 	rdp = xcalloc(1, sizeof(*rdp));
 
 	TAILQ_INIT(&(rdp->rd_branches));
@@ -1240,10 +1233,12 @@ rcs_rev_add(RCSFILE *rf, RCSNUM *rev, const char *msg, time_t date,
 
 	rdp->rd_next = rcsnum_alloc();
 
-	if (username == NULL)
-		username = pw->pw_name;
-
-	rdp->rd_author = xstrdup(username);
+	if (!author && !(author = getlogin())) {
+		if (!(pw = getpwuid(getuid())))
+			fatal("getpwuid failed");
+		author = pw->pw_name;
+	}
+	rdp->rd_author = xstrdup(author);
 	rdp->rd_state = xstrdup(RCS_STATE_EXP);
 	rdp->rd_log = xstrdup(msg);
 
@@ -1337,14 +1332,14 @@ rcs_rev_remove(RCSFILE *rf, RCSNUM *rev)
 	 * When the first revision got specified, prevrdp will be NULL.
 	 */
 	prevrdp = (struct rcs_delta *)TAILQ_NEXT(rdp, rd_list);
-	nextrdp = (struct rcs_delta *)TAILQ_PREV(rdp, cvs_tqh, rd_list);
+	nextrdp = (struct rcs_delta *)TAILQ_PREV(rdp, tqh, rd_list);
 
 	newdeltatext = NULL;
 	prevbuf = NULL;
 	path_tmp1 = path_tmp2 = NULL;
 
 	if (prevrdp != NULL && nextrdp != NULL) {
-		newdiff = cvs_buf_alloc(64);
+		newdiff = buf_alloc(64);
 
 		/* calculate new diff */
 		(void)xasprintf(&path_tmp1, "%s/diff1.XXXXXXXXXX", cvs_tmpdir);
@@ -1354,8 +1349,8 @@ rcs_rev_remove(RCSFILE *rf, RCSNUM *rev)
 		fd2 = rcs_rev_write_stmp(rf, prevrdp->rd_num, path_tmp2, 0);
 
 		diff_format = D_RCSDIFF;
-		if (cvs_diffreg(path_tmp1, path_tmp2,
-		    fd1, fd2, newdiff) == D_ERROR)
+		if (diffreg(path_tmp1, path_tmp2,
+		    fd1, fd2, newdiff, D_FORCEASCII) == D_ERROR)
 			fatal("rcs_diffreg failed");
 
 		close(fd1);
@@ -1644,7 +1639,6 @@ rcs_parse_init(RCSFILE *rfp)
 
 	pdp = xcalloc(1, sizeof(*pdp));
 
-	pdp->rp_lines = 0;
 	pdp->rp_pttype = RCS_TOK_ERR;
 
 	if ((pdp->rp_file = fdopen(rfp->fd, "r")) == NULL)
@@ -2322,8 +2316,6 @@ rcs_gettok(RCSFILE *rfp)
 	/* XXX we must skip backspace too for compatibility, should we? */
 	do {
 		ch = getc(pdp->rp_file);
-		if (ch == '\n')
-			pdp->rp_lines++;
 	} while (isspace(ch));
 
 	if (ch == EOF) {
@@ -2340,8 +2332,8 @@ rcs_gettok(RCSFILE *rfp)
 			if (ch == EOF) {
 				type = RCS_TOK_EOF;
 				break;
-			} else if (!isalnum(ch) && ch != '_' && ch != '-' &&
-			    ch != '/' && ch != '+' && ch != '|') {
+			} else if (!isgraph(ch) ||
+			    strchr(rcs_sym_invch, ch) != NULL) {
 				ungetc(ch, pdp->rp_file);
 				break;
 			}
@@ -2378,8 +2370,7 @@ rcs_gettok(RCSFILE *rfp)
 					ungetc(ch, pdp->rp_file);
 					break;
 				}
-			} else if (ch == '\n')
-				pdp->rp_lines++;
+			}
 
 			*(bp++) = ch;
 			pdp->rp_tlen++;
@@ -2513,8 +2504,8 @@ rcs_deltatext_set(RCSFILE *rfp, RCSNUM *rev, BUF *bp)
 	if (rdp->rd_text != NULL)
 		xfree(rdp->rd_text);
 
-	len = cvs_buf_len(bp);
-	dtext = cvs_buf_release(bp);
+	len = buf_len(bp);
+	dtext = buf_release(bp);
 	bp = NULL;
 
 	if (len != 0) {
@@ -2535,15 +2526,12 @@ rcs_deltatext_set(RCSFILE *rfp, RCSNUM *rev, BUF *bp)
 /*
  * rcs_rev_setlog()
  *
- * Sets the log message of revision <rev> to <logtext>
+ * Sets the log message of revision <rev> to <logtext>.
  */
 int
 rcs_rev_setlog(RCSFILE *rfp, RCSNUM *rev, const char *logtext)
 {
 	struct rcs_delta *rdp;
-	char buf[CVS_REV_BUFSZ];
-
-	rcsnum_tostr(rev, buf, sizeof(buf));
 
 	if ((rdp = rcs_findrev(rfp, rev)) == NULL)
 		return (-1);
@@ -2608,7 +2596,7 @@ rcs_state_set(RCSFILE *rfp, RCSNUM *rev, const char *state)
 int
 rcs_state_check(const char *state)
 {
-	if (strchr(state, ' ') != NULL)
+	if (strcmp(state, RCS_STATE_DEAD) && strcmp(state, RCS_STATE_EXP))
 		return (-1);
 
 	return (0);
@@ -2645,7 +2633,7 @@ rcs_get_revision(const char *revstr, RCSFILE *rfp)
 
 	if (!strcmp(revstr, RCS_HEAD_BRANCH)) {
 		if (rfp->rf_head == NULL)
-			return NULL;
+			return (NULL);
 
 		frev = rcsnum_alloc();
 		rcsnum_cpy(rfp->rf_head, frev, 0);
@@ -2655,11 +2643,8 @@ rcs_get_revision(const char *revstr, RCSFILE *rfp)
 	/* Possibly we could be passed a version number */
 	if ((rev = rcsnum_parse(revstr)) != NULL) {
 		/* Do not return if it is not in RCS file */
-		if ((rdp = rcs_findrev(rfp, rev)) != NULL) {
-			frev = rcsnum_alloc();
-			rcsnum_cpy(rev, frev, 0);
-			return (frev);
-		}
+		if ((rdp = rcs_findrev(rfp, rev)) != NULL)
+			return (rev);
 	} else {
 		/* More likely we will be passed a symbol */
 		rev = rcs_sym_getrev(rfp, revstr);
@@ -2681,13 +2666,10 @@ rcs_get_revision(const char *revstr, RCSFILE *rfp)
 		 * the minimum of both revision lengths is taken
 		 * instead of just 2.
 		 */
-		if (rfp->rf_head == NULL)
-			return NULL;
-
-		if (rcsnum_cmp(rev, rfp->rf_head,
+		if (rfp->rf_head == NULL || rcsnum_cmp(rev, rfp->rf_head,
 		    MIN(rfp->rf_head->rn_len, rev->rn_len)) < 0) {
 			rcsnum_free(rev);
-			return NULL;
+			return (NULL);
 		}
 		return (rev);
 	}
@@ -2727,10 +2709,10 @@ rcs_get_revision(const char *revstr, RCSFILE *rfp)
  * rcs_rev_getlines()
  *
  * Get the entire contents of revision <frev> from the RCSFILE <rfp> and
- * return it as a pointer to a struct cvs_lines.
+ * return it as a pointer to a struct rcs_lines.
  */
-struct cvs_lines *
-rcs_rev_getlines(RCSFILE *rfp, RCSNUM *frev, struct cvs_line ***alines)
+struct rcs_lines *
+rcs_rev_getlines(RCSFILE *rfp, RCSNUM *frev, struct rcs_line ***alines)
 {
 	size_t plen;
 	int annotate, done, i, nextroot;
@@ -2738,8 +2720,8 @@ rcs_rev_getlines(RCSFILE *rfp, RCSNUM *frev, struct cvs_line ***alines)
 	struct rcs_branch *brp;
 	struct rcs_delta *hrdp, *prdp, *rdp, *trdp;
 	u_char *patch;
-	struct cvs_line *line, *nline;
-	struct cvs_lines *dlines, *plines;
+	struct rcs_line *line, *nline;
+	struct rcs_lines *dlines, *plines;
 
 	if (rfp->rf_head == NULL ||
 	    (hrdp = rcs_findrev(rfp, rfp->rf_head)) == NULL)
@@ -2777,7 +2759,7 @@ rcs_rev_getlines(RCSFILE *rfp, RCSNUM *frev, struct cvs_line ***alines)
 				i++;
 			}
 
-			*alines = xcalloc(i + 1, sizeof(struct cvs_line *));
+			*alines = xcalloc(i + 1, sizeof(struct rcs_line *));
 			(*alines)[i] = NULL;
 			annotate = ANNOTATE_NOW;
 
@@ -2801,6 +2783,13 @@ again:
 			trdp = rcs_findrev(rfp, rdp->rd_next);
 			if (trdp == NULL)
 				fatal("failed to grab next revision");
+		} else {
+			/*
+			 * XXX Fail, although the caller does not always do the
+			 * right thing (eg cvs diff when the tree is ahead of
+			 * the repository).
+			 */
+			break;
 		}
 
 		if (rdp->rd_tlen == 0) {
@@ -2833,7 +2822,7 @@ again:
 				i++;
 			}
 
-			*alines = xcalloc(i + 1, sizeof(struct cvs_line *));
+			*alines = xcalloc(i + 1, sizeof(struct rcs_line *));
 			(*alines)[i] = NULL;
 			annotate = ANNOTATE_NOW;
 
@@ -2909,7 +2898,7 @@ done:
 }
 
 void
-rcs_annotate_getlines(RCSFILE *rfp, RCSNUM *frev, struct cvs_line ***alines)
+rcs_annotate_getlines(RCSFILE *rfp, RCSNUM *frev, struct rcs_line ***alines)
 {
 	size_t plen;
 	int i, nextroot;
@@ -2917,8 +2906,8 @@ rcs_annotate_getlines(RCSFILE *rfp, RCSNUM *frev, struct cvs_line ***alines)
 	struct rcs_branch *brp;
 	struct rcs_delta *rdp, *trdp;
 	u_char *patch;
-	struct cvs_line *line;
-	struct cvs_lines *dlines, *plines;
+	struct rcs_line *line;
+	struct rcs_lines *dlines, *plines;
 
 	if (!RCSNUM_ISBRANCHREV(frev))
 		fatal("rcs_annotate_getlines: branch revision expected");
@@ -3010,7 +2999,7 @@ rcs_annotate_getlines(RCSFILE *rfp, RCSNUM *frev, struct cvs_line ***alines)
 		if (line->l_line != NULL)
 			i++;
 	}
-	*alines = xcalloc(i + 1, sizeof(struct cvs_line *));
+	*alines = xcalloc(i + 1, sizeof(struct rcs_line *));
 	(*alines)[i] = NULL;
 
 	i = 0;
@@ -3033,13 +3022,13 @@ rcs_rev_getbuf(RCSFILE *rfp, RCSNUM *rev, int mode)
 {
 	int expmode, expand;
 	struct rcs_delta *rdp;
-	struct cvs_lines *lines;
-	struct cvs_line *lp, *nlp;
+	struct rcs_lines *lines;
+	struct rcs_line *lp, *nlp;
 	BUF *bp;
 
 	expand = 0;
 	lines = rcs_rev_getlines(rfp, rev, NULL);
-	bp = cvs_buf_alloc(1024 * 16);
+	bp = buf_alloc(1024 * 16);
 
 	if (!(mode & RCS_KWEXP_NONE)) {
 		if (rfp->rf_expand != NULL)
@@ -3066,7 +3055,7 @@ rcs_rev_getbuf(RCSFILE *rfp, RCSNUM *rev, int mode)
 			rcs_kwexp_line(rfp->rf_path, rdp, lines, lp, expmode);
 
 		do {
-			cvs_buf_append(bp, lp->l_line, lp->l_len);
+			buf_append(bp, lp->l_line, lp->l_len);
 		} while ((lp = TAILQ_NEXT(lp, l_list)) != nlp);
 	}
 
@@ -3089,8 +3078,8 @@ rcs_rev_write_fd(RCSFILE *rfp, RCSNUM *rev, int _fd, int mode)
 	size_t ret;
 	int expmode, expand;
 	struct rcs_delta *rdp;
-	struct cvs_lines *lines;
-	struct cvs_line *lp, *nlp;
+	struct rcs_lines *lines;
+	struct rcs_line *lp, *nlp;
 	extern int print_stdout;
 
 	expand = 0;
@@ -3165,7 +3154,7 @@ rcs_rev_write_stmp(RCSFILE *rfp,  RCSNUM *rev, char *template, int mode)
 	if ((fd = mkstemp(template)) == -1)
 		fatal("mkstemp: `%s': %s", template, strerror(errno));
 
-	cvs_worklist_add(template, &temp_files);
+	worklist_add(template, &temp_files);
 	rcs_rev_write_fd(rfp, rev, fd, mode);
 
 	if (lseek(fd, 0, SEEK_SET) < 0)
@@ -3175,8 +3164,8 @@ rcs_rev_write_stmp(RCSFILE *rfp,  RCSNUM *rev, char *template, int mode)
 }
 
 static void
-rcs_kwexp_line(char *rcsfile, struct rcs_delta *rdp, struct cvs_lines *lines,
-    struct cvs_line *line, int mode)
+rcs_kwexp_line(char *rcsfile, struct rcs_delta *rdp, struct rcs_lines *lines,
+    struct rcs_line *line, int mode)
 {
 	BUF *tmpbuf;
 	int kwtype;
@@ -3184,7 +3173,6 @@ rcs_kwexp_line(char *rcsfile, struct rcs_delta *rdp, struct cvs_lines *lines,
 	const u_char *c, *start, *fin, *end;
 	char *kwstr;
 	char expbuf[256], buf[256];
-	char *fmt;
 	size_t clen, kwlen, len, tlen;
 
 	kwtype = 0;
@@ -3319,9 +3307,8 @@ rcs_kwexp_line(char *rcsfile, struct rcs_delta *rdp, struct cvs_lines *lines,
 			}
 
 			if (kwtype & RCS_KW_DATE) {
-				fmt = "%Y/%m/%d %H:%M:%S ";
-
-				if (strftime(buf, sizeof(buf), fmt,
+				if (strftime(buf, sizeof(buf),
+				    "%Y/%m/%d %H:%M:%S ",
 				    &rdp->rd_date) == 0)
 					fatal("rcs_kwexp_line: strftime "
 					    "failure");
@@ -3337,12 +3324,9 @@ rcs_kwexp_line(char *rcsfile, struct rcs_delta *rdp, struct cvs_lines *lines,
 				 * digit, %e would do so and there is
 				 * no better format for strftime().
 				 */
-				if (rdp->rd_date.tm_mday < 10)
-					fmt = "%B%e %Y ";
-				else
-					fmt = "%B %e %Y ";
-
-				if (strftime(buf, sizeof(buf), fmt,
+				if (strftime(buf, sizeof(buf),
+				    (rdp->rd_date.tm_mday < 10) ?
+				        "%B%e %Y " : "%B %e %Y ",
 				    &rdp->rd_date) == 0)
 					fatal("rcs_kwexp_line: strftime "
 					    "failure");
@@ -3373,7 +3357,7 @@ rcs_kwexp_line(char *rcsfile, struct rcs_delta *rdp, struct cvs_lines *lines,
 			/* order does not matter anymore below */
 			if (kwtype & RCS_KW_LOG) {
 				char linebuf[256];
-				struct cvs_line *cur, *lp;
+				struct rcs_line *cur, *lp;
 				char *logp, *l_line, *prefix, *q, *sprefix;
 				size_t i;
 
@@ -3416,8 +3400,8 @@ rcs_kwexp_line(char *rcsfile, struct rcs_delta *rdp, struct cvs_lines *lines,
 				if (strlcat(linebuf, buf, sizeof(linebuf))
 				    >= sizeof(buf))
 					fatal("rcs_kwexp_line: truncated");
-				fmt = "  %Y/%m/%d %H:%M:%S  ";
-				if (strftime(buf, sizeof(buf), fmt,
+				if (strftime(buf, sizeof(buf),
+				    "  %Y/%m/%d %H:%M:%S  ",
 				    &rdp->rd_date) == 0)
 					fatal("rcs_kwexp_line: strftime "
 					    "failure");
@@ -3513,28 +3497,28 @@ rcs_kwexp_line(char *rcsfile, struct rcs_delta *rdp, struct cvs_lines *lines,
 				fatal("rcs_kwexp_line: truncated");
 
 		/* Concatenate everything together. */
-		tmpbuf = cvs_buf_alloc(len + strlen(expbuf));
+		tmpbuf = buf_alloc(len + strlen(expbuf));
 		/* Append everything before keyword. */
-		cvs_buf_append(tmpbuf, line->l_line,
+		buf_append(tmpbuf, line->l_line,
 		    start - line->l_line);
 		/* Append keyword. */
-		cvs_buf_puts(tmpbuf, expbuf);
+		buf_puts(tmpbuf, expbuf);
 		/* Point c to end of keyword. */
-		tlen = cvs_buf_len(tmpbuf) - 1;
+		tlen = buf_len(tmpbuf) - 1;
 		/* Append everything after keyword. */
-		cvs_buf_append(tmpbuf, end,
+		buf_append(tmpbuf, end,
 		    line->l_line + line->l_len - end);
-		c = cvs_buf_get(tmpbuf) + tlen;
+		c = buf_get(tmpbuf) + tlen;
 		/* Point fin to end of data. */
-		fin = cvs_buf_get(tmpbuf) + cvs_buf_len(tmpbuf) - 1;
+		fin = buf_get(tmpbuf) + buf_len(tmpbuf) - 1;
 		/* Recalculate new length. */
-		len = cvs_buf_len(tmpbuf);
+		len = buf_len(tmpbuf);
 
 		/* tmpbuf is now ready, convert to string */
 		if (line->l_needsfree)
 			xfree(line->l_line);
 		line->l_len = len;
-		line->l_line = cvs_buf_release(tmpbuf);
+		line->l_line = buf_release(tmpbuf);
 		line->l_needsfree = 1;
 	}
 }
@@ -3546,11 +3530,11 @@ rcs_translate_tag(const char *revstr, RCSFILE *rfp)
 	int follow;
 	time_t deltatime;
 	char branch[CVS_REV_BUFSZ];
-	RCSNUM *brev, *frev, *rev, *rrev;
+	RCSNUM *brev, *frev, *rev;
 	struct rcs_delta *rdp, *trdp;
 	time_t cdate;
 
-	brev = frev = rrev = NULL;
+	brev = frev = NULL;
 
 	if (revstr == NULL) {
 		if (rfp->rf_branch != NULL) {
@@ -3573,7 +3557,7 @@ rcs_translate_tag(const char *revstr, RCSFILE *rfp)
 	else {
 		frev = rcs_sym_getrev(rfp, revstr);
 		if (frev == NULL)
-			frev = rrev = rcsnum_parse(revstr);
+			frev = rcsnum_parse(revstr);
 
 		brev = rcsnum_alloc();
 		rcsnum_cpy(rev, brev, rev->rn_len - 1);
@@ -3585,8 +3569,6 @@ rcs_translate_tag(const char *revstr, RCSFILE *rfp)
 			follow = 0;
 
 		rcsnum_free(brev);
-		if (rrev != NULL)
-			rcsnum_free(rrev);
 	}
 
 	if (cvs_specified_date != -1)
@@ -3615,18 +3597,16 @@ rcs_translate_tag(const char *revstr, RCSFILE *rfp)
 		return (rev);
 	}
 
-	if (frev != NULL)
-		rcsnum_tostr(frev, branch, sizeof(branch));
-
 	if (frev != NULL) {
 		brev = rcsnum_revtobr(frev);
 		brev->rn_len = rev->rn_len - 1;
+		rcsnum_free(frev);
 	}
 
 	rcsnum_free(rev);
 
 	do {
-		deltatime = timelocal(&(rdp->rd_date));
+		deltatime = timegm(&(rdp->rd_date));
 
 		if (RCSNUM_ISBRANCHREV(rdp->rd_num)) {
 			if (deltatime > cdate) {

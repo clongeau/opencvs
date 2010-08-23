@@ -1,4 +1,4 @@
-/*	$OpenBSD: trigger.c,v 1.14 2008/06/17 17:15:56 tobias Exp $	*/
+/*	$OpenBSD: trigger.c,v 1.18 2010/07/23 21:46:05 ray Exp $	*/
 /*
  * Copyright (c) 2008 Tobias Stoeckmann <tobias@openbsd.org>
  * Copyright (c) 2008 Jonathan Armani <dbd@asystant.net>
@@ -22,6 +22,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <libgen.h>
+#include <pwd.h>
 #include <regex.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,6 +34,7 @@
 
 static int	 expand_args(BUF *, struct file_info_list *, const char *,
     const char *, char *);
+static int	 expand_var(BUF *, const char *);
 static char	*parse_cmd(int, char *, const char *, struct file_info_list *);
 
 static int
@@ -69,10 +71,10 @@ expand_args(BUF *buf, struct file_info_list *file_info, const char *repo,
 		}
 	}
 	if (quote)
-		cvs_buf_putc(buf, '"');
+		buf_putc(buf, '"');
 	if (oldstyle) {
-		cvs_buf_puts(buf, repo);
-		cvs_buf_putc(buf, ' ');
+		buf_puts(buf, repo);
+		buf_putc(buf, ' ');
 	}
 
 	if (*format == '\0')
@@ -82,16 +84,16 @@ expand_args(BUF *buf, struct file_info_list *file_info, const char *repo,
 	 * check like this, add only uses loginfo for directories anyway
 	 */
 	if (cvs_cmdop == CVS_OP_ADD) {
-		cvs_buf_puts(buf, "- New directory");
+		buf_puts(buf, "- New directory");
 		if (quote)
-			cvs_buf_putc(buf, '"');
+			buf_putc(buf, '"');
 		return (0);
 	}
 
 	if (cvs_cmdop == CVS_OP_IMPORT) {
-		cvs_buf_puts(buf, "- Imported sources");
+		buf_puts(buf, "- Imported sources");
 		if (quote)
-			cvs_buf_putc(buf, '"');
+			buf_putc(buf, '"');
 		return (0);
 	}
 
@@ -153,10 +155,10 @@ expand_args(BUF *buf, struct file_info_list *file_info, const char *repo,
 			}
 
 			if (val != NULL)
-				cvs_buf_puts(buf, val);
+				buf_puts(buf, val);
 
 			if (*(++p) != '\0')
-				cvs_buf_putc(buf, ',');
+				buf_putc(buf, ',');
 		}
 
 		if (fi != NULL)
@@ -168,13 +170,53 @@ expand_args(BUF *buf, struct file_info_list *file_info, const char *repo,
 		    *format == 'p' || *format == 'r' || *format == 't'))
 			break;
 
-		cvs_buf_putc(buf, ' ');
+		buf_putc(buf, ' ');
 	}
 
 	if (quote)
-		cvs_buf_putc(buf, '"');
+		buf_putc(buf, '"');
 
 	return 0;
+}
+
+static int
+expand_var(BUF *buf, const char *var)
+{
+	struct passwd *pw;
+	const char *val;
+
+	if (*var == '=') {
+		if ((val = cvs_var_get(++var)) == NULL) {
+			cvs_log(LP_ERR, "no such user variable ${=%s}", var);
+			return (1);
+		}
+		buf_puts(buf, val);
+	} else {
+		if (strcmp(var, "CVSEDITOR") == 0 ||
+		    strcmp(var, "EDITOR") == 0 ||
+		    strcmp(var, "VISUAL") == 0)
+			buf_puts(buf, cvs_editor);
+		else if (strcmp(var, "CVSROOT") == 0)
+			buf_puts(buf, current_cvsroot->cr_dir);
+		else if (strcmp(var, "USER") == 0) {
+			pw = getpwuid(geteuid());
+			if (pw == NULL) {
+				cvs_log(LP_ERR, "unable to retrieve "
+				    "caller ID");
+				return (1);
+			}
+			buf_puts(buf, pw->pw_name);
+		} else if (strcmp(var, "RCSBIN") == 0) {
+			cvs_log(LP_ERR, "RCSBIN internal variable is no "
+			    "longer supported");
+			return (1);
+		} else {
+			cvs_log(LP_ERR, "no such internal variable $%s", var);
+			return (1);
+		}
+	}
+
+	return (0);
 }
 
 static char *
@@ -219,44 +261,66 @@ parse_cmd(int type, char *cmd, const char *repo,
 	if (*p == '%')
 		return (NULL);
 
-	buf = cvs_buf_alloc(1024);
+	buf = buf_alloc(1024);
 
 	p = cmd;
 again:
 	for (; *p != '\0'; p++) {
-		if ((pos = strcspn(p, "%")) != 0) {
-			cvs_buf_append(buf, p, pos);
+		if ((pos = strcspn(p, "$%")) != 0) {
+			buf_append(buf, p, pos);
 			p += pos;
 		}
 
-		if (*p++ == '\0')
-			break;
-
 		q = NULL;
-		switch (*p) {
-		case '\0':
-			goto bad;
-		case '{':
-			if (strchr(allowed_args, '{') == NULL)
-				goto bad;
-			pos = strcspn(++p, "}");
-			if (p[pos] == '\0')
-				goto bad;
+		if (*p == '\0')
+			break;
+		if (*p++ == '$') {
+			if (*p == '{') {
+				pos = strcspn(++p, "}");
+				if (p[pos] == '\0')
+					goto bad;
+			} else {
+				for (pos = 0; isalpha(p[pos]); pos++)
+					;
+				if (pos == 0) {
+					cvs_log(LP_ERR,
+					    "unrecognized variable syntax");
+					goto bad;
+				}
+			}
 			q = xmalloc(pos + 1);
 			memcpy(q, p, pos);
 			q[pos] = '\0';
-			args = q;
-			p += pos;
-			break;
-		default:
-			argbuf[0] = *p;
-			args = argbuf;
-			break;
+			if (expand_var(buf, q))
+				goto bad;
+			p += pos - (*(p - 1) == '{' ? 0 : 1);
+		} else {
+			switch (*p) {
+			case '\0':
+				goto bad;
+			case '{':
+				if (strchr(allowed_args, '{') == NULL)
+					goto bad;
+				pos = strcspn(++p, "}");
+				if (p[pos] == '\0')
+					goto bad;
+				q = xmalloc(pos + 1);
+				memcpy(q, p, pos);
+				q[pos] = '\0';
+				args = q;
+				p += pos;
+				break;
+			default:
+				argbuf[0] = *p;
+				args = argbuf;
+				break;
+			}
+	
+			if (expand_args(buf, file_info, repo, allowed_args,
+			    args))
+				goto bad;
+			expanded = 1;
 		}
-
-		if (expand_args(buf, file_info, repo, allowed_args, args))
-			goto bad;
-		expanded = 1;
 
 		if (q != NULL)
 			xfree(q);
@@ -268,14 +332,14 @@ again:
 		goto again;
 	}
 
-	cvs_buf_putc(buf, '\0');
-	return (cvs_buf_release(buf));
+	buf_putc(buf, '\0');
+	return (buf_release(buf));
 
 bad:
 	if (q != NULL)
 		xfree(q);
 	cvs_log(LP_NOTICE, "%s contains malformed command '%s'", file, cmd);
-	cvs_buf_free(buf);
+	buf_free(buf);
 	return (NULL);
 }
 
@@ -288,26 +352,25 @@ cvs_trigger_handle(int type, char *repo, char *in, struct trigger_list *list,
 	struct trigger_line *line;
 
 	TAILQ_FOREACH(line, list, flist) {
-		cmd = parse_cmd(type, line->line, repo, files);
-		if (cmd != NULL) {
-			switch(type) {
-			case CVS_TRIGGER_COMMITINFO:
-			case CVS_TRIGGER_TAGINFO:
-			case CVS_TRIGGER_VERIFYMSG:
-				if ((r = cvs_exec(cmd, NULL, 1)) != 0) {
-					xfree(cmd);
-					return r;
-				}
-				break;
-			default:
-				(void)cvs_exec(cmd, in, 1);
-				break;
+		if ((cmd = parse_cmd(type, line->line, repo, files)) == NULL)
+			return (1);
+		switch(type) {
+		case CVS_TRIGGER_COMMITINFO:
+		case CVS_TRIGGER_TAGINFO:
+		case CVS_TRIGGER_VERIFYMSG:
+			if ((r = cvs_exec(cmd, NULL, 1)) != 0) {
+				xfree(cmd);
+				return (r);
 			}
-			xfree(cmd);
+			break;
+		default:
+			(void)cvs_exec(cmd, in, 1);
+			break;
 		}
+		xfree(cmd);
 	}
 
-	return 0;
+	return (0);
 }
 
 struct trigger_list *
@@ -489,19 +552,19 @@ cvs_trigger_loginfo_header(BUF *buf, char *repo)
 		    strerror(errno));
 	}
 
-	cvs_buf_puts(buf, "Update of ");
-	cvs_buf_puts(buf, current_cvsroot->cr_dir);
-	cvs_buf_putc(buf, '/');
-	cvs_buf_puts(buf, repo);
-	cvs_buf_putc(buf, '\n');
+	buf_puts(buf, "Update of ");
+	buf_puts(buf, current_cvsroot->cr_dir);
+	buf_putc(buf, '/');
+	buf_puts(buf, repo);
+	buf_putc(buf, '\n');
 
-	cvs_buf_puts(buf, "In directory ");
-	cvs_buf_puts(buf, hostname);
-	cvs_buf_puts(buf, ":");
-	cvs_buf_puts(buf, dirname(pwd));
-	cvs_buf_putc(buf, '/');
-	cvs_buf_puts(buf, repo);
-	cvs_buf_putc(buf, '\n');
-	cvs_buf_putc(buf, '\n');
+	buf_puts(buf, "In directory ");
+	buf_puts(buf, hostname);
+	buf_puts(buf, ":");
+	buf_puts(buf, dirname(pwd));
+	buf_putc(buf, '/');
+	buf_puts(buf, repo);
+	buf_putc(buf, '\n');
+	buf_putc(buf, '\n');
 }
 

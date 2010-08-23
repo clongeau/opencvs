@@ -1,4 +1,4 @@
-/*	$OpenBSD: client.c,v 1.116 2008/06/14 03:19:15 joris Exp $	*/
+/*	$OpenBSD: client.c,v 1.122 2010/07/23 21:46:05 ray Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -54,6 +54,7 @@ struct cvs_req cvs_requests[] = {
 	{ "Argumentx",		0,	cvs_server_argumentx, REQ_NEEDED },
 	{ "Global_option",	0,	cvs_server_globalopt, REQ_NEEDED },
 	{ "Set",		0,	cvs_server_set, REQ_NEEDED },
+	{ "expand-modules",	0,	cvs_server_exp_modules, 0 },
 
 	/*
 	 * used to tell the server what is going on in our
@@ -72,7 +73,6 @@ struct cvs_req cvs_requests[] = {
 	{ "Kerberos-encrypt",		0,	NULL, 0 },
 	{ "Gssapi-encrypt",		0,	NULL, 0 },
 	{ "Gssapi-authenticate",	0,	NULL, 0 },
-	{ "expand-modules",		0,	NULL, 0 },
 
 	/* commands that might be supported */
 	{ "ci",			0,	cvs_server_commit,	REQ_NEEDDIR },
@@ -134,20 +134,20 @@ client_get_supported_responses(void)
 	int i, first;
 
 	first = 0;
-	bp = cvs_buf_alloc(512);
+	bp = buf_alloc(512);
 	for (i = 0; cvs_responses[i].supported != -1; i++) {
 		if (cvs_responses[i].hdlr == NULL)
 			continue;
 
 		if (first != 0)
-			cvs_buf_putc(bp, ' ');
+			buf_putc(bp, ' ');
 		else
 			first++;
-		cvs_buf_puts(bp, cvs_responses[i].name);
+		buf_puts(bp, cvs_responses[i].name);
 	}
 
-	cvs_buf_putc(bp, '\0');
-	d = cvs_buf_release(bp);
+	buf_putc(bp, '\0');
+	d = buf_release(bp);
 	return (d);
 }
 
@@ -492,7 +492,7 @@ cvs_client_sendfile(struct cvs_file *cf)
 			    sizeof(timebuf));
 			if (len >= sizeof(timebuf))
 				fatal("cvs_client_sendfile: truncation");
-			len = strlcat(timebuf, "+", sizeof(timebuf));
+			len = strlcat(timebuf, "+=", sizeof(timebuf));
 			if (len >= sizeof(timebuf))
 				fatal("cvs_client_sendfile: truncation");
 		}
@@ -518,7 +518,7 @@ cvs_client_sendfile(struct cvs_file *cf)
 
 	switch (cf->file_status) {
 	case FILE_UNKNOWN:
-		if (cf->fd != -1)
+		if (cf->file_flags & FILE_ON_DISK)
 			cvs_client_send_request("Questionable %s",
 			    cf->file_name);
 		break;
@@ -644,7 +644,8 @@ cvs_client_checkedin(char *data)
 		if (len >= sizeof(timebuf))
 			fatal("cvs_client_sendfile: truncation");
 	} else {
-		ctime_r(&ent->ce_mtime, timebuf);
+		gmtime_r(&ent->ce_mtime, &datetm);
+		asctime_r(&datetm, timebuf);
 		timebuf[strcspn(timebuf, "\n")] = '\0';
 
 		if (newent->ce_tag != NULL) {
@@ -685,7 +686,7 @@ cvs_client_updated(char *data)
 	struct timeval tv[2];
 	char repo[MAXPATHLEN], *entry;
 	char timebuf[CVS_TIME_BUFSZ], revbuf[CVS_REV_BUFSZ];
-	char *en, *mode, *len, *rpath;
+	char *en, *mode, *len, *rpath, *p;
 	char sticky[CVS_ENT_MAXLINELEN], fpath[MAXPATHLEN];
 
 	if (data == NULL)
@@ -704,8 +705,11 @@ cvs_client_updated(char *data)
 	if (strlen(repo) + 1 > strlen(rpath))
 		fatal("received a repository path that is too short");
 
-	(void)xsnprintf(fpath, sizeof(fpath), "%s/%s", data,
-	    strrchr(rpath, '/'));
+	p = strrchr(rpath, '/');
+	if (p == NULL)
+		fatal("malicious repository path from server");
+
+	(void)xsnprintf(fpath, sizeof(fpath), "%s/%s", data, p);
 
 	flen = strtonum(len, 0, INT_MAX, &errstr);
 	if (errstr != NULL)

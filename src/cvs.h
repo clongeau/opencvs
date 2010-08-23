@@ -1,4 +1,4 @@
-/*	$OpenBSD: cvs.h,v 1.172 2008/06/27 21:14:15 xsa Exp $	*/
+/*	$OpenBSD: cvs.h,v 1.178 2010/07/23 21:46:05 ray Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -39,10 +39,7 @@
 #include "util.h"
 #include "xmalloc.h"
 
-#define CVS_VERSION	"OpenCVS 4.4"
-
-#define CVS_HIST_CACHE	128
-#define CVS_HIST_NBFLD	6
+#define CVS_VERSION	"OpenCVS 4.5"
 
 #define CVS_CKSUM_LEN	MD5_DIGEST_STRING_LENGTH
 
@@ -80,8 +77,6 @@
 #define CVS_OP_VERSION		25
 #define CVS_OP_WATCH		26
 #define CVS_OP_WATCHERS		27
-
-#define CVS_OP_ANY		64	/* all operations */
 
 /* methods */
 #define CVS_METHOD_NONE		0
@@ -212,20 +207,10 @@ struct cvsroot {
 	u_int   cr_port;
 
 	/* connection data */
-	u_int   cr_flags;
 	FILE   *cr_srvin;
 	FILE   *cr_srvout;
 	FILE   *cr_srverr;
-	char   *cr_version;     /* version of remote server */
-	u_char  cr_vrmask[16];  /* mask of valid requests supported by server */
-
-	TAILQ_ENTRY(cvsroot) root_cache;
 };
-
-#define CVS_SETVR(rt, rq) ((rt)->cr_vrmask[(rq) / 8] |=  (1 << ((rq) % 8)))
-#define CVS_GETVR(rt, rq) ((rt)->cr_vrmask[(rq) / 8] &   (1 << ((rq) % 8)))
-#define CVS_CLRVR(rt, rq) ((rt)->cr_vrmask[(rq) / 8] &= ~(1 << ((rq) % 8)))
-#define CVS_RSTVR(rt)	memset((rt)->cr_vrmask, 0, sizeof((rt)->cr_vrmask))
 
 #define CVS_HIST_ADDED		'A'
 #define CVS_HIST_EXPORT		'E'
@@ -246,6 +231,7 @@ struct cvsroot {
 #define CVS_ENT_ADDED		1
 #define CVS_ENT_REMOVED		2
 #define CVS_ENT_UPTODATE	3
+#define CVS_ENT_UNKNOWN		4
 
 #define CVS_ENT_MAXLINELEN	1024
 
@@ -294,7 +280,7 @@ extern struct module_checkout *current_module;
 extern char *module_repo_root;
 
 extern struct ignore_head checkout_ign_pats;
-extern struct cvs_wklhead temp_files;
+extern struct wklhead temp_files;
 extern volatile sig_atomic_t sig_received;
 extern volatile sig_atomic_t cvs_quit;
 extern struct cvsroot *current_cvsroot;
@@ -371,7 +357,7 @@ const char	*cvs_var_get(const char *);
 void		 cvs_cleanup(void);
 
 /* date.y */
-time_t		 cvs_date_parse(const char *);
+time_t		 date_parse(const char *);
 
 /* entries.c */
 struct cvs_ent	*cvs_ent_parse(const char *);

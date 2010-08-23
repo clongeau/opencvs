@@ -1,4 +1,4 @@
-/*	$OpenBSD: checkout.c,v 1.156 2008/07/08 12:29:58 joris Exp $	*/
+/*	$OpenBSD: checkout.c,v 1.167 2010/07/30 21:47:18 ray Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -47,6 +47,7 @@ static char *dateflag = NULL;
 
 static int nflag = 0;
 
+static char lastwd[MAXPATHLEN];
 char *checkout_target_dir = NULL;
 
 time_t cvs_specified_date = -1;
@@ -93,7 +94,8 @@ cvs_checkout(int argc, char **argv)
 			exit(0);
 		case 'D':
 			dateflag = optarg;
-			cvs_specified_date = cvs_date_parse(dateflag);
+			if ((cvs_specified_date = date_parse(dateflag)) == -1)
+				fatal("invalid date: %s", dateflag);
 			reset_tag = 0;
 			break;
 		case 'd':
@@ -120,7 +122,7 @@ cvs_checkout(int argc, char **argv)
 			if (RCS_KWEXP_INVAL(kflag)) {
 				cvs_log(LP_ERR,
 				    "invalid RCS keyword expansion mode");
-				fatal("%s", cvs_cmd_add.cmd_synopsis);
+				fatal("%s", cvs_cmd_checkout.cmd_synopsis);
 			}
 			break;
 		case 'l':
@@ -180,17 +182,28 @@ cvs_export(int argc, char **argv)
 
 	while ((ch = getopt(argc, argv, cvs_cmd_export.cmd_opts)) != -1) {
 		switch (ch) {
+		case 'd':
+			if (dflag != NULL)
+				fatal("-d specified two or more times");
+			dflag = optarg;
+			checkout_target_dir = dflag;
+
+			if (cvs_server_active == 1)
+				disable_fast_checkout = 1;
+			break;
 		case 'k':
 			koptstr = optarg;
 			kflag = rcs_kflag_get(koptstr);
 			if (RCS_KWEXP_INVAL(kflag)) {
 				cvs_log(LP_ERR,
 				    "invalid RCS keyword expansion mode");
-				fatal("%s", cvs_cmd_add.cmd_synopsis);
+				fatal("%s", cvs_cmd_export.cmd_synopsis);
 			}
 			break;
 		case 'l':
 			flags &= ~CR_RECURSE_DIRS;
+			break;
+		case 'N':
 			break;
 		case 'R':
 			flags |= CR_RECURSE_DIRS;
@@ -288,10 +301,10 @@ checkout_check_repository(int argc, char **argv)
 		mc = cvs_module_lookup(argv[i]);
 		current_module = mc;
 
-		TAILQ_FOREACH(fl, &(mc->mc_ignores), flist)
+		RB_FOREACH(fl, cvs_flisthead, &(mc->mc_ignores))
 			cvs_file_ignore(fl->file_path, &checkout_ign_pats);
 
-		TAILQ_FOREACH(fl, &(mc->mc_modules), flist) {
+		RB_FOREACH(fl, cvs_flisthead, &(mc->mc_modules)) {
 			module_repo_root = NULL;
 
 			(void)xsnprintf(repo, sizeof(repo), "%s/%s",
@@ -352,10 +365,12 @@ checkout_check_repository(int argc, char **argv)
 		}
 
 		if (mc->mc_canfree == 1) {
-			for (fl = TAILQ_FIRST(&(mc->mc_modules));
-			    fl != TAILQ_END(&(mc->mc_modules)); fl = nxt) {
-				nxt = TAILQ_NEXT(fl, flist);
-				TAILQ_REMOVE(&(mc->mc_modules), fl, flist);
+			for (fl = RB_MIN(cvs_flisthead, &(mc->mc_modules));
+			    fl != NULL; fl = nxt) {
+				nxt = RB_NEXT(cvs_flisthead,
+				    &(mc->mc_modules), fl);
+				RB_REMOVE(cvs_flisthead,
+				    &(mc->mc_modules), fl);
 				xfree(fl->file_path);
 				xfree(fl);
 			}
@@ -413,8 +428,8 @@ checkout_repository(const char *repobase, const char *wdbase)
 	struct cvs_flisthead fl, dl;
 	struct cvs_recursion cr;
 
-	TAILQ_INIT(&fl);
-	TAILQ_INIT(&dl);
+	RB_INIT(&fl);
+	RB_INIT(&dl);
 
 	cvs_history_add((cvs_cmdop == CVS_OP_CHECKOUT) ?
 	    CVS_HISTORY_CHECKOUT : CVS_HISTORY_EXPORT, NULL, wdbase);
@@ -438,7 +453,7 @@ checkout_repository(const char *repobase, const char *wdbase)
 
 	cvs_repository_lock(repobase, 0);
 	cvs_repository_getdir(repobase, wdbase, &fl, &dl,
-	    flags & CR_RECURSE_DIRS ? 1 : 0);
+	    flags & CR_RECURSE_DIRS ? REPOSITORY_DODIRS : 0);
 
 	cvs_file_walklist(&fl, &cr);
 	cvs_file_freelist(&fl);
@@ -484,7 +499,7 @@ cvs_checkout_file(struct cvs_file *cf, RCSNUM *rnum, char *tag, int co_flags)
 		(void)unlink(cf->file_path);
 
 		if (!(co_flags & CO_MERGE)) {
-			if (cf->fd != -1) {
+			if (cf->file_flags & FILE_ON_DISK) {
 				exists = 1;
 				(void)close(cf->fd);
 			}
@@ -496,6 +511,7 @@ cvs_checkout_file(struct cvs_file *cf, RCSNUM *rnum, char *tag, int co_flags)
 				    strerror(errno));
 
 			rcs_rev_write_fd(cf->file_rcs, rnum, cf->fd, 0);
+			cf->file_flags |= FILE_ON_DISK;
 		} else {
 			cvs_merge_file(cf, (cvs_join_rev1 == NULL));
 		}
@@ -559,7 +575,7 @@ cvs_checkout_file(struct cvs_file *cf, RCSNUM *rnum, char *tag, int co_flags)
 		sticky[0] = '\0';
 
 	kbuf[0] = '\0';
-	if (cf->file_rcs->rf_expand != NULL) {
+	if (cf->file_rcs != NULL && cf->file_rcs->rf_expand != NULL) {
 		cf_kflag = rcs_kflag_get(cf->file_rcs->rf_expand);
 		if (kflag || cf_kflag != RCS_KWEXP_DEFAULT)
 			(void)xsnprintf(kbuf, sizeof(kbuf),
@@ -584,6 +600,17 @@ cvs_checkout_file(struct cvs_file *cf, RCSNUM *rnum, char *tag, int co_flags)
 			(void)unlink(cf->file_path);
 			cvs_merge_file(cf, (cvs_join_rev1 == NULL));
 			tosend = cf->file_path;
+		}
+
+		/*
+		 * If this file has a tag, push out the Directory with the
+		 * tag to the client. Except when this file was explicitly
+		 * specified on the command line.
+		 */
+		if (tag != NULL && strcmp(cf->file_wd, lastwd) &&
+		    !(cf->file_flags & FILE_USER_SUPPLIED)) {
+			strlcpy(lastwd, cf->file_wd, MAXPATHLEN);
+			cvs_server_set_sticky(cf->file_wd, sticky);
 		}
 
 		if (co_flags & CO_COMMIT)

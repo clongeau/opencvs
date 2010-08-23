@@ -1,4 +1,4 @@
-/*	$OpenBSD: tag.c,v 1.76 2008/06/20 14:04:29 tobias Exp $	*/
+/*	$OpenBSD: tag.c,v 1.79 2009/03/24 18:33:25 joris Exp $	*/
 /*
  * Copyright (c) 2006 Xavier Santolaria <xsa@openbsd.org>
  *
@@ -226,7 +226,9 @@ cvs_tag(int argc, char **argv)
 	}
 
 bad:
-	cvs_trigger_freeinfo(&files_info);
+	if (line_list != NULL)
+		cvs_trigger_freeinfo(&files_info);
+
 	return (0);
 }
 
@@ -260,9 +262,6 @@ cvs_tag_check_files(struct cvs_file *cf)
 		break;
 	}
 
-	fi = xcalloc(1, sizeof(*fi));
-	fi->nrevstr = xstrdup(rbuf);
-
 	if (cvs_cmdop == CVS_OP_TAG) {
 		if (cf->file_ent == NULL)
 			return;
@@ -271,6 +270,8 @@ cvs_tag_check_files(struct cvs_file *cf)
 		srev = cf->file_rcsrev;
 
 	rcsnum_tostr(srev, rbuf, sizeof(rbuf));
+	fi = xcalloc(1, sizeof(*fi));
+	fi->nrevstr = xstrdup(rbuf);
 	fi->file_path = xstrdup(cf->file_path);
 
 	if (tag_oldname != NULL)
@@ -351,8 +352,6 @@ cvs_tag_local(struct cvs_file *cf)
 		if (tag_del(cf) == 0) {
 			if (verbosity > 0)
 				cvs_printf("D %s\n", cf->file_path);
-
-			rcs_write(cf->file_rcs);
 		}
 		return;
 	}
@@ -364,14 +363,14 @@ cvs_tag_local(struct cvs_file *cf)
 			    "couldn't tag added but un-commited file `%s'",
 			    cf->file_path);
 		}
-		return;
+		break;
 	case FILE_REMOVED:
 		if (verbosity > 1) {
 			cvs_log(LP_NOTICE,
 			    "skipping removed but un-commited file `%s'",
 			    cf->file_path);
 		}
-		return;
+		break;
 	case FILE_CHECKOUT:
 	case FILE_MODIFIED:
 	case FILE_PATCH:
@@ -379,8 +378,6 @@ cvs_tag_local(struct cvs_file *cf)
 		if (tag_add(cf) == 0) {
 			if (verbosity > 0)
 				cvs_printf("T %s\n", cf->file_path);
-
-			rcs_write(cf->file_rcs);
 			cvs_history_add(CVS_HISTORY_TAG, cf, tag_name);
 		}
 		break;

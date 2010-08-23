@@ -1,4 +1,4 @@
-/*	$OpenBSD: update.c,v 1.156 2008/06/28 13:10:02 joris Exp $	*/
+/*	$OpenBSD: update.c,v 1.163 2010/07/30 21:47:18 ray Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -78,7 +78,8 @@ cvs_update(int argc, char **argv)
 			break;
 		case 'D':
 			dateflag = optarg;
-			cvs_specified_date = cvs_date_parse(dateflag);
+			if ((cvs_specified_date = date_parse(dateflag)) == -1)
+				fatal("invalid date: %s", dateflag);
 			reset_tag = 0;
 			break;
 		case 'd':
@@ -246,6 +247,12 @@ cvs_update_leavedir(struct cvs_file *cf)
 	if (cvs_server_active == 1 && !strcmp(cf->file_name, "."))
 		return;
 
+	entlist = cvs_ent_open(cf->file_path);
+	if (!TAILQ_EMPTY(&(entlist->cef_ent))) {
+		isempty = 0;
+		goto prune_it;
+	}
+
 	if (fstat(cf->fd, &st) == -1)
 		fatal("cvs_update_leavedir: %s", strerror(errno));
 
@@ -283,13 +290,8 @@ cvs_update_leavedir(struct cvs_file *cf)
 				continue;
 			}
 
-			if (!strcmp(dp->d_name, CVS_PATH_CVSDIR)) {
-				entlist = cvs_ent_open(cf->file_path);
-				if (!TAILQ_EMPTY(&(entlist->cef_ent)))
-					isempty = 0;
-			} else {
+			if (strcmp(dp->d_name, CVS_PATH_CVSDIR)) 
 				isempty = 0;
-			}
 
 			if (isempty == 0)
 				break;
@@ -303,6 +305,7 @@ cvs_update_leavedir(struct cvs_file *cf)
 
 	xfree(buf);
 
+prune_it:
 	if ((isempty == 1 && prune_dirs == 1) ||
 	    (cvs_server_active == 1 && cvs_cmdop == CVS_OP_CHECKOUT)) {
 		/* XXX */
@@ -333,7 +336,7 @@ cvs_update_local(struct cvs_file *cf)
 
 		if (cf->file_status != FILE_UNKNOWN &&
 		    verbosity > 1)
-			cvs_log(LP_NOTICE, "Updating %s", cf->file_path);
+			cvs_log(LP_ERR, "Updating %s", cf->file_path);
 		return;
 	}
 
@@ -434,9 +437,16 @@ cvs_update_local(struct cvs_file *cf)
 		    cf->file_ent->ce_tag != NULL)))
 			flags = CO_SETSTICKY;
 
-		cvs_checkout_file(cf, cf->file_rcsrev, tag, flags);
-		cvs_printf("U %s\n", cf->file_path);
-		cvs_history_add(CVS_HISTORY_UPDATE_CO, cf, NULL);
+		if (cf->file_flags & FILE_ON_DISK && (cf->file_ent == NULL ||
+		    cf->file_ent->ce_type == CVS_ENT_NONE)) {
+			cvs_log(LP_ERR, "move away %s; it is in the way",
+			    cf->file_path);
+			cvs_printf("C %s\n", cf->file_path);
+		} else {
+			cvs_checkout_file(cf, cf->file_rcsrev, tag, flags);
+			cvs_printf("U %s\n", cf->file_path);
+			cvs_history_add(CVS_HISTORY_UPDATE_CO, cf, NULL);
+		}
 		break;
 	case FILE_MERGE:
 		d3rev1 = cf->file_ent->ce_rev;
@@ -455,12 +465,13 @@ cvs_update_local(struct cvs_file *cf)
 		break;
 	case FILE_UNLINK:
 		(void)unlink(cf->file_path);
-		if (cvs_server_active == 1)
-			cvs_checkout_file(cf, cf->file_rcsrev, tag, CO_REMOVE);
 	case FILE_REMOVE_ENTRY:
 		entlist = cvs_ent_open(cf->file_wd);
 		cvs_ent_remove(entlist, cf->file_name);
 		cvs_history_add(CVS_HISTORY_UPDATE_REMOVE, cf, NULL);
+
+		if (cvs_server_active == 1)
+			cvs_checkout_file(cf, cf->file_rcsrev, tag, CO_REMOVE);
 		break;
 	case FILE_UPTODATE:
 		if (cvs_cmdop != CVS_OP_UPDATE)
@@ -526,20 +537,20 @@ update_has_conflict_markers(struct cvs_file *cf)
 	BUF *bp;
 	int conflict;
 	char *content;
-	struct cvs_line *lp;
-	struct cvs_lines *lines;
+	struct rcs_line *lp;
+	struct rcs_lines *lines;
 	size_t len;
 
 	cvs_log(LP_TRACE, "update_has_conflict_markers(%s)", cf->file_path);
 
-	if (cf->fd == -1 || cf->file_ent == NULL)
+	if (!(cf->file_flags & FILE_ON_DISK) || cf->file_ent == NULL)
 		return (0);
 
-	bp = cvs_buf_load_fd(cf->fd);
+	bp = buf_load_fd(cf->fd);
 
-	cvs_buf_putc(bp, '\0');
-	len = cvs_buf_len(bp);
-	content = cvs_buf_release(bp);
+	buf_putc(bp, '\0');
+	len = buf_len(bp);
+	content = buf_release(bp);
 	if ((lines = cvs_splitlines(content, len)) == NULL)
 		fatal("update_has_conflict_markers: failed to split lines");
 
@@ -589,7 +600,10 @@ update_join_file(struct cvs_file *cf)
 
 	if ((p = strchr(jrev2, ':')) != NULL) {
 		(*p++) = '\0';
-		cvs_specified_date = cvs_date_parse(p);
+		if ((cvs_specified_date = date_parse(p)) == -1) {
+			cvs_printf("invalid date: %s", p);
+			goto out;
+		}
 	}
 
 	rev2 = rcs_translate_tag(jrev2, cf->file_rcs);
@@ -598,7 +612,10 @@ update_join_file(struct cvs_file *cf)
 	if (jrev1 != NULL) {
 		if ((p = strchr(jrev1, ':')) != NULL) {
 			(*p++) = '\0';
-			cvs_specified_date = cvs_date_parse(p);
+			if ((cvs_specified_date = date_parse(p)) == -1) {
+				cvs_printf("invalid date: %s", p);
+				goto out;
+			}
 		}
 
 		rev1 = rcs_translate_tag(jrev1, cf->file_rcs);
@@ -649,7 +666,7 @@ update_join_file(struct cvs_file *cf)
 	}
 
 	if (rev1 == NULL || !strcmp(state1, RCS_STATE_DEAD)) {
-		if (cf->fd != -1) {
+		if (cf->file_flags & FILE_ON_DISK) {
 			cvs_printf("%s exists but has been added in %s\n",
 			    cf->file_path, jrev2);
 		} else {
@@ -663,7 +680,7 @@ update_join_file(struct cvs_file *cf)
 	if (!rcsnum_cmp(rev1, rev2, 0))
 		goto out;
 
-	if (cf->fd == -1) {
+	if (!(cf->file_flags & FILE_ON_DISK)) {
 		cvs_printf("%s does not exist but is present in %s\n",
 		    cf->file_path, jrev2);
 		goto out;

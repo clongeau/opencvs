@@ -1,4 +1,4 @@
-/*	$OpenBSD: remote.c,v 1.24 2008/06/14 03:19:15 joris Exp $	*/
+/*	$OpenBSD: remote.c,v 1.29 2010/07/23 21:46:05 ray Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -219,8 +219,8 @@ cvs_remote_send_file_buf(char *file, BUF *bp, mode_t mode)
 	if (cvs_server_active != 1)
 		fatal("cvs_remote_send_file_buf is server only");
 
-	len = cvs_buf_len(bp);
-	data = cvs_buf_release(bp);
+	len = buf_len(bp);
+	data = buf_release(bp);
 
 	cvs_modetostr(mode, buf, sizeof(buf));
 	cvs_remote_output(buf);
@@ -249,10 +249,15 @@ cvs_remote_classify_file(struct cvs_file *cf)
 	cf->file_ent = cvs_ent_get(entlist, cf->file_name);
 
 	if (cf->file_ent != NULL && cf->file_ent->ce_status != CVS_ENT_REG) {
-		if (cf->file_ent->ce_status == CVS_ENT_ADDED)
-			cf->file_status = FILE_ADDED;
-		else
+		if (cf->file_ent->ce_status == CVS_ENT_ADDED) {
+			if (cf->fd != -1)
+				cf->file_status = FILE_ADDED;
+			else
+				cf->file_status = FILE_UNKNOWN;
+		} else {
 			cf->file_status = FILE_REMOVED;
+		}
+
 		return;
 	}
 
@@ -263,16 +268,20 @@ cvs_remote_classify_file(struct cvs_file *cf)
 			cf->file_type = CVS_FILE;
 	}
 
-	if (cf->fd != -1 && cf->file_ent != NULL) {
+	if (cf->fd != -1)
+		cf->file_flags |= FILE_ON_DISK;
+
+	if ((cf->file_flags & FILE_ON_DISK) && cf->file_ent != NULL) {
 		if (fstat(cf->fd, &st) == -1)
 			fatal("cvs_remote_classify_file(%s): %s", cf->file_path,
 			    strerror(errno));
 
-		if (st.st_mtime != cf->file_ent->ce_mtime)
+		if (st.st_mtime != cf->file_ent->ce_mtime ||
+		    cf->file_ent->ce_conflict != NULL)
 			cf->file_status = FILE_MODIFIED;
 		else
 			cf->file_status = FILE_UPTODATE;
-	} else if (cf->fd == -1) {
+	} else if (!(cf->file_flags & FILE_ON_DISK)) {
 		cf->file_status = FILE_UNKNOWN;
 	}
 

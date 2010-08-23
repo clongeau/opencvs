@@ -1,4 +1,4 @@
-/*	$OpenBSD: logmsg.c,v 1.50 2008/06/10 01:00:34 joris Exp $	*/
+/*	$OpenBSD: logmsg.c,v 1.54 2010/07/23 21:46:05 ray Exp $	*/
 /*
  * Copyright (c) 2007 Joris Vink <joris@openbsd.org>
  *
@@ -62,10 +62,11 @@ cvs_logmsg_read(const char *path)
 		fatal("cvs_logmsg_read: %s: file size too big", path);
 
 	lbuf = NULL;
-	bp = cvs_buf_alloc(st.st_size);
+	bp = buf_alloc(st.st_size);
 	while ((buf = fgetln(fp, &len))) {
 		if (buf[len - 1] == '\n') {
 			buf[len - 1] = '\0';
+			--len;
 		} else {
 			lbuf = xmalloc(len + 1);
 			memcpy(lbuf, buf, len);
@@ -73,14 +74,12 @@ cvs_logmsg_read(const char *path)
 			buf = lbuf;
 		}
 
-		len = strlen(buf);
-
 		if (!strncmp(buf, CVS_LOGMSG_PREFIX,
 		    sizeof(CVS_LOGMSG_PREFIX) - 1))
 			continue;
 
-		cvs_buf_append(bp, buf, len);
-		cvs_buf_putc(bp, '\n');
+		buf_append(bp, buf, len);
+		buf_putc(bp, '\n');
 	}
 
 	if (lbuf != NULL)
@@ -88,8 +87,8 @@ cvs_logmsg_read(const char *path)
 
 	(void)fclose(fp);
 
-	cvs_buf_putc(bp, '\0');
-	return (cvs_buf_release(bp));
+	buf_putc(bp, '\0');
+	return (buf_release(bp));
 }
 
 char *
@@ -115,7 +114,7 @@ cvs_logmsg_create(char *dir, struct cvs_flisthead *added,
 	if ((fd = mkstemp(fpath)) == -1)
 		fatal("cvs_logmsg_create: mkstemp %s", strerror(errno));
 
-	cvs_worklist_add(fpath, &temp_files);
+	worklist_add(fpath, &temp_files);
 
 	if ((fp = fdopen(fd, "w")) == NULL) {
 		saved_errno = errno;
@@ -164,27 +163,27 @@ cvs_logmsg_create(char *dir, struct cvs_flisthead *added,
 		    dir != NULL ? dir : ".", CVS_LOGMSG_PREFIX);
 	}
 
-	if (added != NULL && !TAILQ_EMPTY(added)) {
+	if (added != NULL && !RB_EMPTY(added)) {
 		fprintf(fp, "%s Added Files:", CVS_LOGMSG_PREFIX);
-		TAILQ_FOREACH(cf, added, flist)
+		RB_FOREACH(cf, cvs_flisthead, added)
 			fprintf(fp, "\n%s\t%s", CVS_LOGMSG_PREFIX,
 			    dir != NULL ? basename(cf->file_path) :
 			    cf->file_path);
 		fputs("\n", fp);
 	}
 
-	if (removed != NULL && !TAILQ_EMPTY(removed)) {
+	if (removed != NULL && !RB_EMPTY(removed)) {
 		fprintf(fp, "%s Removed Files:", CVS_LOGMSG_PREFIX);
-		TAILQ_FOREACH(cf, removed, flist)
+		RB_FOREACH(cf, cvs_flisthead, removed)
 			fprintf(fp, "\n%s\t%s", CVS_LOGMSG_PREFIX,
 			    dir != NULL ? basename(cf->file_path) :
 			    cf->file_path);
 		fputs("\n", fp);
 	}
 
-	if (modified != NULL && !TAILQ_EMPTY(modified)) {
+	if (modified != NULL && !RB_EMPTY(modified)) {
 		fprintf(fp, "%s Modified Files:", CVS_LOGMSG_PREFIX);
-		TAILQ_FOREACH(cf, modified, flist)
+		RB_FOREACH(cf, cvs_flisthead, modified)
 			fprintf(fp, "\n%s\t%s", CVS_LOGMSG_PREFIX,
 			    dir != NULL ? basename(cf->file_path) :
 			    cf->file_path);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: status.c,v 1.88 2008/06/14 04:34:08 tobias Exp $	*/
+/*	$OpenBSD: status.c,v 1.93 2010/04/19 13:03:10 millert Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  * Copyright (c) 2005-2008 Xavier Santolaria <xsa@openbsd.org>
@@ -121,7 +121,8 @@ cvs_status_local(struct cvs_file *cf)
 	size_t len;
 	RCSNUM *head;
 	const char *status;
-	char buf[128], timebuf[CVS_TIME_BUFSZ], revbuf[CVS_REV_BUFSZ];
+	char buf[MAXPATHLEN + CVS_REV_BUFSZ + 128];
+	char timebuf[CVS_TIME_BUFSZ], revbuf[CVS_REV_BUFSZ];
 	struct rcs_sym *sym;
 
 	cvs_log(LP_TRACE, "cvs_status_local(%s)", cf->file_path);
@@ -134,8 +135,13 @@ cvs_status_local(struct cvs_file *cf)
 		return;
 	}
 
+	if (cf->file_status == FILE_UPTODATE &&
+	    !(cf->file_flags & FILE_ON_DISK) &&
+	    !(cf->file_flags & FILE_USER_SUPPLIED))
+		return;
+
 	if (cf->file_rcs != NULL)
-		head = rcs_head_get(cf->file_rcs);
+		head = cf->file_rcsrev;
 	else
 		head = NULL;
 
@@ -150,7 +156,7 @@ cvs_status_local(struct cvs_file *cf)
 	    cf->file_ent->ce_conflict != NULL)
 		status = "File had conflicts on merge";
 
-	if (cf->fd == -1) {
+	if (!(cf->file_flags & FILE_ON_DISK)) {
 		(void)xsnprintf(buf, sizeof(buf), "no file %s\t",
 		    cf->file_name);
 	} else
@@ -200,7 +206,6 @@ cvs_status_local(struct cvs_file *cf)
 			fatal("cvs_status_local: truncation");
 	} else {
 		rcsnum_tostr(head, revbuf, sizeof(revbuf));
-		rcsnum_free(head);
 		(void)xsnprintf(buf, sizeof(buf), "%s\t%s", revbuf,
 		    cf->file_rpath);
 	}

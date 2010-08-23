@@ -1,4 +1,4 @@
-/*	$OpenBSD: repository.c,v 1.20 2008/03/09 03:14:52 joris Exp $	*/
+/*	$OpenBSD: repository.c,v 1.23 2010/07/23 08:31:19 ray Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -25,7 +25,7 @@
 
 #include "cvs.h"
 
-struct cvs_wklhead repo_locks;
+struct wklhead repo_locks;
 
 void
 cvs_repository_unlock(const char *repo)
@@ -37,7 +37,7 @@ cvs_repository_unlock(const char *repo)
 	(void)xsnprintf(fpath, sizeof(fpath), "%s/%s", repo, CVS_LOCK);
 
 	/* XXX - this ok? */
-	cvs_worklist_run(&repo_locks, cvs_worklist_unlink);
+	worklist_run(&repo_locks, worklist_unlink);
 }
 
 void
@@ -91,12 +91,12 @@ cvs_repository_lock(const char *repo, int wantlock)
 	}
 
 	(void)close(i);
-	cvs_worklist_add(fpath, &repo_locks);
+	worklist_add(fpath, &repo_locks);
 }
 
 void
 cvs_repository_getdir(const char *dir, const char *wdir,
-	struct cvs_flisthead *fl, struct cvs_flisthead *dl, int dodirs)
+	struct cvs_flisthead *fl, struct cvs_flisthead *dl, int flags)
 {
 	int type;
 	DIR *dirp;
@@ -157,21 +157,27 @@ cvs_repository_getdir(const char *dir, const char *wdir,
 			}
 		}
 
-		if (dodirs == 0 && type == CVS_DIR)
-			continue;
+		if (!(flags & REPOSITORY_DODIRS) && type == CVS_DIR) {
+			if (strcmp(dp->d_name, CVS_PATH_ATTIC))
+				continue;
+		}
 
 		switch (type) {
 		case CVS_DIR:
-			if (!strcmp(dp->d_name, CVS_PATH_ATTIC))
-				cvs_repository_getdir(rpath, wdir, fl, dl, 0);
-			else
-				cvs_file_get(fpath, 0, dl);
+			if (!strcmp(dp->d_name, CVS_PATH_ATTIC)) {
+				cvs_repository_getdir(rpath, wdir, fl, dl,
+				    REPOSITORY_IS_ATTIC);
+			} else {
+				cvs_file_get(fpath, 0, dl, CVS_DIR);
+			}
 			break;
 		case CVS_FILE:
 			if ((s = strrchr(fpath, ',')) != NULL &&
 			    s != fpath && !strcmp(s, RCS_FILE_EXT)) {
 				*s = '\0';
-				cvs_file_get(fpath, 0, fl);
+				cvs_file_get(fpath, 
+				    (flags & REPOSITORY_IS_ATTIC) ?
+				    FILE_INSIDE_ATTIC : 0, fl, CVS_FILE);
 			}
 			break;
 		default:

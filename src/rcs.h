@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcs.h,v 1.92 2008/06/15 04:38:52 tobias Exp $	*/
+/*	$OpenBSD: rcs.h,v 1.94 2010/07/23 21:46:05 ray Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -31,11 +31,9 @@
 #include "buf.h"
 #include "compat.h"
 
-#define RCS_DIFF_MAXARG		32
 #define RCS_DIFF_DIV \
 	"==================================================================="
 
-#define RCSDIR			"RCS"
 #define RCS_FILE_EXT		",v"
 
 #define RCS_HEAD_BRANCH		"HEAD"
@@ -48,7 +46,6 @@
 
 #define RCS_SYM_INVALCHAR	"$,.:;@"
 
-
 #define RCS_MAGIC_BRANCH	".0."
 #define RCS_STATE_EXP		"Exp"
 #define RCS_STATE_DEAD		"dead"
@@ -57,7 +54,6 @@
 #define RCS_LOCK_INVAL		(-1)
 #define RCS_LOCK_LOOSE		0
 #define RCS_LOCK_STRICT		1
-
 
 /*
  * Keyword expansion table
@@ -95,7 +91,6 @@
 	((k & RCS_KWEXP_ERR) || \
 	((k & RCS_KWEXP_OLD) && (k & ~RCS_KWEXP_OLD)))
 
-
 struct rcs_kw {
 	char	kw_str[16];
 	int	kw_type;
@@ -112,7 +107,6 @@ struct rcs_kw {
 /* file flags */
 #define RCS_READ	  (1<<0)
 #define RCS_WRITE	  (1<<1)
-#define RCS_RDWR	  (RCS_READ|RCS_WRITE)
 #define RCS_CREATE	  (1<<2)  /* create the file */
 #define RCS_PARSE_FULLY   (1<<3)  /* fully parse it on open */
 
@@ -130,17 +124,10 @@ struct rcs_kw {
 #define RCS_RD_DEAD	0x01	/* dead */
 #define RCS_RD_SELECT	0x02	/* select for operation */
 
-/* used for rcs_checkout_rev */
-#define CHECKOUT_REV_CREATED	1
-#define CHECKOUT_REV_MERGED	2
-#define CHECKOUT_REV_REMOVED	3
-#define CHECKOUT_REV_UPDATED	4
-
 typedef struct rcs_num {
 	u_int		 rn_len;
 	u_int16_t	*rn_id;
 } RCSNUM;
-
 
 struct rcs_access {
 	char			*ra_name;
@@ -158,13 +145,12 @@ struct rcs_lock {
 	char	*rl_name;
 	RCSNUM	*rl_num;
 
-	TAILQ_ENTRY(rcs_lock)	rl_list;
+	TAILQ_ENTRY(rcs_lock)	 rl_list;
 };
-
 
 struct rcs_branch {
 	RCSNUM			*rb_num;
-	TAILQ_ENTRY(rcs_branch)	rb_list;
+	TAILQ_ENTRY(rcs_branch)	 rb_list;
 };
 
 TAILQ_HEAD(rcs_dlist, rcs_delta);
@@ -208,8 +194,8 @@ typedef struct rcs_file {
 	void	*rf_pdata;
 } RCSFILE;
 
-struct cvs_line;
-struct cvs_lines;
+struct rcs_line;
+struct rcs_lines;
 
 RCSFILE			*rcs_open(const char *, int, int, ...);
 void			 rcs_close(RCSFILE *);
@@ -253,10 +239,10 @@ RCSNUM			*rcs_tag_resolve(RCSFILE *, const char *);
 void			 rcs_write(RCSFILE *);
 int			 rcs_rev_write_stmp(RCSFILE *,  RCSNUM *, char *, int);
 void			 rcs_rev_write_fd(RCSFILE *, RCSNUM *, int, int);
-struct cvs_lines	*rcs_rev_getlines(RCSFILE *, RCSNUM *,
-			     struct cvs_line ***);
+struct rcs_lines	*rcs_rev_getlines(RCSFILE *, RCSNUM *,
+			     struct rcs_line ***);
 void			 rcs_annotate_getlines(RCSFILE *, RCSNUM *,
-			     struct cvs_line ***);
+			     struct rcs_line ***);
 BUF			*rcs_rev_getbuf(RCSFILE *, RCSNUM *, int);
 void			 rcs_delta_stats(struct rcs_delta *, int *, int *);
 

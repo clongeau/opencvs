@@ -1,4 +1,4 @@
-/*	$OpenBSD: modules.c,v 1.13 2008/03/08 21:58:34 tobias Exp $	*/
+/*	$OpenBSD: modules.c,v 1.16 2009/03/29 19:17:26 joris Exp $	*/
 /*
  * Copyright (c) 2008 Joris Vink <joris@openbsd.org>
  *
@@ -45,7 +45,7 @@ cvs_modules_list(void)
 	struct module_info *mi;
 
 	TAILQ_FOREACH(mi, &modules, m_list)
-		printf("%s\n", mi->mi_str);
+		cvs_printf("%s\n", mi->mi_str);
 }
 
 int
@@ -158,8 +158,9 @@ modules_parse_line(char *line, int lineno)
 	mi->mi_str = bline;
 
 	dirname = NULL;
-	TAILQ_INIT(&(mi->mi_modules));
-	TAILQ_INIT(&(mi->mi_ignores));
+	RB_INIT(&(mi->mi_modules));
+	RB_INIT(&(mi->mi_ignores));
+
 	for (sp = val; *sp != '\0'; sp = dp) {
 		dp = sp;
 		while (!isspace(*dp) && *dp != '\0')
@@ -171,9 +172,11 @@ modules_parse_line(char *line, int lineno)
 			if (sp[0] == '!') {
 				if (strlen(sp) < 2)
 					fatal("invalid ! pattern");
-				cvs_file_get((sp + 1), 0, &(mi->mi_ignores));
+				cvs_file_get((sp + 1), 0,
+				    &(mi->mi_ignores), 0);
 			} else {
-				cvs_file_get(sp, 0, &(mi->mi_modules));
+				cvs_file_get(sp, 0,
+				    &(mi->mi_modules), 0);
 			}
 		} else if (sp == val) {
 			dirname = sp;
@@ -185,17 +188,19 @@ modules_parse_line(char *line, int lineno)
 				sp++;
 				(void)xsnprintf(fpath, sizeof(fpath), "%s/%s",
 				    dirname, sp);
-				cvs_file_get(fpath, 0, &(mi->mi_ignores));
+				cvs_file_get(fpath, 0,
+				    &(mi->mi_ignores), 0);
 			} else {
 				(void)xsnprintf(fpath, sizeof(fpath), "%s/%s",
 				    dirname, sp);
-				cvs_file_get(fpath, 0, &(mi->mi_modules));
+				cvs_file_get(fpath, 0,
+				    &(mi->mi_modules), 0);
 			}
 		}
 	}
 
-	if (!(mi->mi_flags & MODULE_ALIAS) && TAILQ_EMPTY(&(mi->mi_modules)))
-		cvs_file_get(dirname, 0, &(mi->mi_modules));
+	if (!(mi->mi_flags & MODULE_ALIAS) && RB_EMPTY(&(mi->mi_modules)))
+		cvs_file_get(dirname, 0, &(mi->mi_modules), 0);
 
 	TAILQ_INSERT_TAIL(&modules, mi, m_list);
 	return (0);
@@ -228,9 +233,9 @@ cvs_module_lookup(char *name)
 		}
 	}
 
-	TAILQ_INIT(&(mc->mc_modules));
-	TAILQ_INIT(&(mc->mc_ignores));
-	cvs_file_get(name, 0, &(mc->mc_modules));
+	RB_INIT(&(mc->mc_modules));
+	RB_INIT(&(mc->mc_ignores));
+	cvs_file_get(name, 0, &(mc->mc_modules), 0);
 	mc->mc_canfree = 1;
 	mc->mc_name = name;
 	mc->mc_flags = MODULE_ALIAS;

@@ -15,6 +15,9 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+/* needed for vasprintf */
+#define _GNU_SOURCE
+
 #include <sys/stat.h>
 
 #include <errno.h>

@@ -184,7 +184,7 @@ cvs_remote_send_file(const char *path, int _fd)
 	cvs_modetostr(st.st_mode, buf, sizeof(buf));
 	cvs_remote_output(buf);
 
-	(void)xsnprintf(buf, sizeof(buf), "%lld", st.st_size);
+	(void)xsnprintf(buf, sizeof(buf), "%lld", (long long int) st.st_size);
 	cvs_remote_output(buf);
 
 	if ((in = fdopen(fd, "r")) == NULL)
@@ -204,7 +204,9 @@ cvs_remote_send_file(const char *path, int _fd)
 	}
 
 	if (total != st.st_size)
-		fatal("length mismatch, %lld vs %lld", total, st.st_size);
+		fatal("length mismatch, %lld vs %lld",
+		      (long long int) total,
+		      (long long int) st.st_size);
 
 	(void)fclose(in);
 }

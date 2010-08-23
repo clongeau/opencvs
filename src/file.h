@@ -29,8 +29,7 @@
 #define FILE_H
 
 #include "../openbsd-compat/sys-queue.h"
-#include "sys/queue.h"
-#include "sys/tree.h"
+#include "../openbsd-compat/sys-tree.h"
 
 #include <dirent.h>
 #include <stdio.h>

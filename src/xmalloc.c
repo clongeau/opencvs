@@ -13,6 +13,9 @@
  * called by a name other than "ssh" or "Secure Shell".
  */
 
+/* needed for vasprintf */
+#define _GNU_SOURCE
+
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>

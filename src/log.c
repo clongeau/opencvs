@@ -25,6 +25,9 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+/* needed for vasprintf */
+#define _GNU_SOURCE
+
 #include <errno.h>
 #include <string.h>
 

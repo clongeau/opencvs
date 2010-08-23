@@ -1,12 +1,14 @@
 2010-08-23  chl  <chl@tuxfamily.org>
 
-	* openbsd-compat/sys-tree.h: 
-	* src/file.h:
-	- add "openbsd-compat/sys-tree.h" header
+	- update from the latest OpenCVS cvs repo (source and regress).
 
 	* src/CVS/Root:
 	* regress/CVS/Root:
 	- update
+
+	* openbsd-compat/sys-tree.h: 
+	* src/file.h:
+	- add "sys-tree.h" header
 
 	* src/diff3.c (diff3_getline):
 	- rename getline() to diff3_getline(), to avoid colision with

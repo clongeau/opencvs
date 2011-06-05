@@ -25,6 +25,7 @@
 
 #include <sys/stat.h>
 
+#include <err.h>
 #include <fcntl.h>
 #include <stdlib.h>
 

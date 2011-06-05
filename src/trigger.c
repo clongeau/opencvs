@@ -1,4 +1,4 @@
-/*	$OpenBSD: trigger.c,v 1.18 2010/07/23 21:46:05 ray Exp $	*/
+/*	$OpenBSD: trigger.c,v 1.20 2011/05/20 19:22:47 nicm Exp $	*/
 /*
  * Copyright (c) 2008 Tobias Stoeckmann <tobias@openbsd.org>
  * Copyright (c) 2008 Jonathan Armani <dbd@asystant.net>
@@ -16,7 +16,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include "../openbsd-compat/sys-queue.h"
+#include "sys-queue.h"
 #include <sys/types.h>
 
 #include <ctype.h>
@@ -254,7 +254,6 @@ parse_cmd(int type, char *cmd, const char *repo,
 		return (NULL);
 	}
 
-	/* XXX move this out of this function */
 	/* before doing any stuff, check if the command starts with % */
 	for (p = cmd; *p != '%' && !isspace(*p) && *p != '\0'; p++)
 		;
@@ -561,7 +560,7 @@ cvs_trigger_loginfo_header(BUF *buf, char *repo)
 	buf_puts(buf, "In directory ");
 	buf_puts(buf, hostname);
 	buf_puts(buf, ":");
-	buf_puts(buf, dirname(pwd));
+	buf_puts(buf, dir);
 	buf_putc(buf, '/');
 	buf_puts(buf, repo);
 	buf_putc(buf, '\n');

@@ -16,7 +16,7 @@
  */
 
 #include <sys/param.h>
-#include "../openbsd-compat/sys-queue.h"
+#include "sys-queue.h"
 
 #include <stdio.h>
 #include <stdlib.h>

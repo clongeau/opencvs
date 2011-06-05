@@ -1,4 +1,4 @@
-AC_INIT([OpenCVS],[4.4.0],[Charles Longeau <chl@openbsd.org>])
+AC_INIT([OpenCVS],[4.5.0],[Charles Longeau <chl@openbsd.org>])
 AM_INIT_AUTOMAKE
 
 # Checks for programs.

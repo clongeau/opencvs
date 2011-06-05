@@ -1,3 +1,15 @@
+2011-06-01  chl  <chl@tuxfamily.org>
+
+	- update from the latest OpenCVS cvs repo (source and regress).
+
+	* openbsd-compat/Makefile.am:
+	* openbsd-compat/compat.h:
+	* openbsd-compat/md5.c:
+	* openbsd-compat/md5_helper.c:
+	* LICENSE:
+	- remove md5{,_helper}.c files, no longer needed
+	- update licenses
+
 2010-08-23  chl  <chl@tuxfamily.org>
 
 	- update from the latest OpenCVS cvs repo (source and regress).

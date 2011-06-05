@@ -170,9 +170,9 @@ cvs_history_add(int type, struct cvs_file *cf, const char *argument)
 	} else {
 		if ((fp = fdopen(fd, "a")) != NULL) {
 			fprintf(fp, "%c%x|%s|%s|%s|%s|%s\n",
-			    historytab[type], time(NULL), getlogin(), cwd,
-			    repo, rev, (cf != NULL) ? cf->file_name :
-			    argument);
+			    historytab[type], (unsigned int) time(NULL),
+			    getlogin(), cwd, repo, rev,
+			    (cf != NULL) ? cf->file_name : argument);
 			(void)fclose(fp);
 		} else {
 			cvs_log(LP_ERR, "failed to add entry to history file");

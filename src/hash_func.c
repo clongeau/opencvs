@@ -33,7 +33,7 @@
  */
 
 #include <sys/types.h>
-#include "../openbsd-compat/sys-queue.h"
+#include "sys-queue.h"
 
 #include "hash.h"
 

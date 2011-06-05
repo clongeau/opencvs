@@ -28,7 +28,7 @@ void cvs_parse_modules(void);
 int config_parse_line(char *, int);
 int modules_parse_line(char *, int);
 
-#include "../openbsd-compat/sys-queue.h"
+#include "sys-queue.h"
 #include "file.h"
 
 /* module stuff */
@@ -53,7 +53,7 @@ struct module_checkout {
 /*
  * On solaris module_info is defined in /usr/include/sys/stream.h
  * 1/ rename it to cvs_module_info
- * 2/ add a define to map existing module_info to cvs_modul_info
+ * 2/ add a define to map existing module_info to cvs_module_info
  */
 
 struct cvs_module_info {

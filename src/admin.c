@@ -17,8 +17,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/param.h>
-
 #include <errno.h>
 #include <fcntl.h>
 #include <libgen.h>

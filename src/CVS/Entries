@@ -3,7 +3,6 @@
 /config.c/1.15/Result of merge//THEAD
 /config.h/1.10/Mon Mar 10 09:56:40 2008//THEAD
 /cvsintro.7/1.14/Mon Mar 10 09:56:40 2008//THEAD
-/fatal.c/1.14/Wed Jun 18 20:03:31 2008//THEAD
 /hash.c/1.1/Sat Jun 21 15:39:15 2008//THEAD
 /hash_func.c/1.1/Sat Jun 21 15:39:15 2008//THEAD
 /admin.c/1.64/Result of merge//THEAD
@@ -48,7 +47,6 @@
 /file.c/1.262/Result of merge//THEAD
 /import.c/1.103/Result of merge//THEAD
 /init.c/1.38/Wed Dec  1 01:12:49 2010//THEAD
-/rcs.h/1.98/Result of merge+Wed Dec  1 01:12:52 2010//THEAD
 /rcsparse.h/1.1/Fri Oct 15 08:44:12 2010//THEAD
 /root.c/1.47/Wed Dec  1 01:12:53 2010//THEAD
 /tag.c/1.80/Wed Dec  1 01:12:53 2010//THEAD
@@ -66,4 +64,6 @@
 /date.y/1.22/Wed Jun  1 15:42:24 2011//THEAD
 /rcs.c/1.310/Wed Jun  1 16:34:06 2011//THEAD
 /util.c/1.155/Fri May 27 11:51:10 2011//THEAD
+/fatal.c/1.14/Wed Jun  1 17:39:59 2011//THEAD
+/rcs.h/1.99/Result of merge//THEAD
 D
